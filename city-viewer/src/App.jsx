@@ -91,7 +91,15 @@ export default function App() {
         {debugInfo.netError && (
           <>
             <br />
-            last error: {debugInfo.netError}
+            last carto error: {debugInfo.netError}
+          </>
+        )}
+        <br />
+        building tiles: {debugInfo.buildingTiles ?? "?"}
+        {debugInfo.buildingTilesError && (
+          <>
+            <br />
+            last building tile error: {debugInfo.buildingTilesError}
           </>
         )}
       </div>

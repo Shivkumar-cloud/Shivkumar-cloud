@@ -75,6 +75,10 @@ export default function MapView({
   // to rebuild the TileLayer (and its tile cache) on every filter tweak.
   const propsRef = useRef({});
   propsRef.current = { colorMode, ranges, heightFilter, scale, is3D, onSelectBuilding, onViewCounts };
+  // Temporary diagnostic: is our own same-origin PMTiles building layer
+  // loading tiles at all, independent of whatever the third-party basemap
+  // is doing? If this is also stuck, the problem isn't CARTO-specific.
+  const buildingStatsRef = useRef({ attempted: 0, ok: 0, failed: 0, empty: 0, lastError: null });
 
   useEffect(() => {
     // MapLibre needs WebGL; on devices/browsers without it the constructor
@@ -120,6 +124,11 @@ export default function MapView({
       onDebug?.({
         net: `started:${netStats.started} ok:${netStats.ok} failed:${netStats.failed} pending:${netStats.pending.size}`,
         netError: netStats.lastError,
+      });
+      const b = buildingStatsRef.current;
+      onDebug?.({
+        buildingTiles: `attempted:${b.attempted} ok:${b.ok} failed:${b.failed} empty:${b.empty}`,
+        buildingTilesError: b.lastError,
       });
     }, 1000);
 
@@ -217,13 +226,25 @@ export default function MapView({
       },
       getTileData: async ({ index, signal }) => {
         const { z, x, y } = index;
-        const result = await pmtilesInstance.getZxy(z, x, y, signal);
-        if (!result?.data) return [];
-        const features = await load(result.data, MVTLoader, {
-          mvt: { coordinates: "wgs84", tileIndex: { x, y, z } },
-          worker: false, // avoid depending on an external CDN for the parser worker at runtime
-        });
-        return features.filter((f) => f && f.properties);
+        const stats = buildingStatsRef.current;
+        stats.attempted++;
+        try {
+          const result = await pmtilesInstance.getZxy(z, x, y, signal);
+          if (!result?.data) {
+            stats.empty++;
+            return [];
+          }
+          const features = await load(result.data, MVTLoader, {
+            mvt: { coordinates: "wgs84", tileIndex: { x, y, z } },
+            worker: false, // avoid depending on an external CDN for the parser worker at runtime
+          });
+          stats.ok++;
+          return features.filter((f) => f && f.properties);
+        } catch (err) {
+          stats.failed++;
+          stats.lastError = err?.message || String(err);
+          throw err;
+        }
       },
       renderSubLayers: (subProps) => {
         return new GeoJsonLayer({
