@@ -14,9 +14,6 @@ concurrency:
   group: "pages"
   cancel-in-progress: false
 
-env:
-  MAHARASHTRA_PBF_URL: https://download.geofabrik.de/asia/india/maharashtra-latest.osm.pbf
-
 jobs:
   build-data:
     runs-on: ubuntu-latest
@@ -41,15 +38,33 @@ jobs:
         working-directory: city-viewer/pipeline
         run: node fetch-boundary.cjs pune-boundary.geojson pune.poly
 
-      - name: Download Maharashtra OSM extract (Geofabrik)
+      - name: Download OSM extract for Maharashtra (falls back to all-India)
         working-directory: city-viewer/pipeline
+        env:
+          STATE_PBF_URL: https://download.geofabrik.de/asia/india/maharashtra-latest.osm.pbf
+          COUNTRY_PBF_URL: https://download.geofabrik.de/asia/india-latest.osm.pbf
         run: |
-          curl -fL --retry 4 --retry-delay 5 -o maharashtra-latest.osm.pbf "$MAHARASHTRA_PBF_URL"
-          ls -la maharashtra-latest.osm.pbf
+          set -e
+          fetch_and_validate() {
+            local url="$1"
+            echo "Trying $url"
+            curl -fL --retry 4 --retry-delay 5 -o region.osm.pbf "$url" || return 1
+            osmium fileinfo region.osm.pbf > /dev/null 2>&1 || return 1
+          }
+          if fetch_and_validate "$STATE_PBF_URL"; then
+            echo "Using Maharashtra state extract"
+          elif fetch_and_validate "$COUNTRY_PBF_URL"; then
+            echo "Maharashtra extract unavailable or invalid; using all-India extract instead"
+          else
+            echo "::error::Could not download a valid OSM PBF extract from Geofabrik"
+            exit 1
+          fi
+          ls -la region.osm.pbf
+          osmium fileinfo region.osm.pbf
 
-      - name: Extract Pune from the state extract
+      - name: Extract Pune from the region extract
         working-directory: city-viewer/pipeline
-        run: osmium extract -p pune.poly --strategy=smart -o pune.osm.pbf --overwrite maharashtra-latest.osm.pbf
+        run: osmium extract -p pune.poly --strategy=smart -o pune.osm.pbf --overwrite region.osm.pbf
 
       - name: Filter to tagged buildings only
         working-directory: city-viewer/pipeline
