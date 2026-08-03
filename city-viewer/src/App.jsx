@@ -23,6 +23,7 @@ export default function App() {
   const [viewCounts, setViewCounts] = useState({});
   const [selectedBuilding, setSelectedBuilding] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [mapError, setMapError] = useState(null);
 
   useEffect(() => {
     const p = new PMTiles(CITY_CONFIG.pmtilesUrl);
@@ -66,7 +67,14 @@ export default function App() {
         resetToken={resetToken}
         onViewCounts={setViewCounts}
         onSelectBuilding={setSelectedBuilding}
+        onError={setMapError}
       />
+
+      {mapError && (
+        <div className="map-error-banner" role="alert">
+          {mapError}
+        </div>
+      )}
 
       <header className="title-panel">
         <h1>{CITY_CONFIG.name}</h1>

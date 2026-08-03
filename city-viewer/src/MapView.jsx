@@ -26,6 +26,7 @@ export default function MapView({
   onViewCounts,
   onSelectBuilding,
   onMapReady,
+  onError,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -49,6 +50,14 @@ export default function MapView({
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 140, unit: "metric" }), "bottom-left");
+
+    // MapLibre swallows style/tile network failures into a console error by
+    // default, which leaves the map looking like a plain black screen with
+    // no way for a user (or us, remotely) to tell what went wrong. Surface it.
+    map.on("error", (e) => {
+      console.error("MapLibre error:", e?.error || e);
+      onError?.(e?.error?.message || "Failed to load the map. Check your network connection.");
+    });
 
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     mapRef.current = map;
