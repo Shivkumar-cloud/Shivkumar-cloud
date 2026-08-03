@@ -21,7 +21,7 @@
         <button id="mode-pune">🕌 Real Pune, India</button>
       </div>
 
-      <div class="panel-group">
+      <div class="panel-group" id="commonControls">
         <button id="regenerate">🔁 Regenerate</button>
         <button id="toggle-day">🌗 Day / Night</button>
         <button id="toggle-wireframe">🔲 Wireframe</button>
@@ -33,14 +33,19 @@
         <input type="range" id="citySize" min="4" max="24" step="1" value="12" />
       </div>
 
-      <div class="panel-group slider-group hidden" id="googleGroup">
-        <label for="googleKey">Google Maps API key (optional, stays in your browser)</label>
-        <input type="password" id="googleKey" placeholder="Paste your API key" autocomplete="off" />
-        <button id="fetch-roads">🛣️ Fetch Real Roads (Google)</button>
-        <p id="roads-status" class="status-text"></p>
+      <div class="panel-group slider-group hidden" id="exploreGroup">
+        <label for="placeSearch">Search a place in Pune</label>
+        <div class="search-row">
+          <input type="text" id="placeSearch" placeholder="e.g. Kothrud, Hinjewadi, MG Road" autocomplete="off" />
+          <button id="search-go">Go</button>
+        </div>
 
-        <button id="fetch-osm">🧱 Load Real Buildings (OpenStreetMap)</button>
-        <p id="osm-status" class="status-text"></p>
+        <label for="exploreRadius">Load radius: <span id="exploreRadiusValue">450</span> m</label>
+        <input type="range" id="exploreRadius" min="200" max="900" step="50" value="450" />
+
+        <button id="load-area">🌐 Load Real Area Here (OpenStreetMap)</button>
+        <p id="explore-status" class="status-text"></p>
+        <p class="attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</p>
       </div>
     </section>
 
@@ -51,7 +56,7 @@
         <dt>Height</dt><dd id="info-height">-</dd>
         <dt>Floors</dt><dd id="info-floors">-</dd>
         <dt>Footprint</dt><dd id="info-footprint">-</dd>
-        <dt>District</dt><dd id="info-district">-</dd>
+        <dt>Type</dt><dd id="info-district">-</dd>
       </dl>
       <p id="info-description" class="hidden"></p>
     </aside>

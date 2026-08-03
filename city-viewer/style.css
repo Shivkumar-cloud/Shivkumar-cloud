@@ -98,6 +98,10 @@ html, body {
   transform: scale(0.97);
 }
 
+#panel button.hidden {
+  display: none;
+}
+
 .mode-group button {
   flex: 1;
   text-align: center;
@@ -109,8 +113,28 @@ html, body {
   font-weight: 600;
 }
 
-#citySizeGroup.hidden {
+#citySizeGroup.hidden,
+#exploreGroup.hidden {
   display: none;
+}
+
+.search-row {
+  display: flex;
+  gap: 6px;
+}
+
+.search-row input[type="text"] {
+  flex: 1;
+}
+
+.attribution {
+  margin: 6px 0 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.attribution a {
+  color: var(--muted);
 }
 
 .slider-group {
