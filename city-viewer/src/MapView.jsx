@@ -39,15 +39,25 @@ export default function MapView({
   propsRef.current = { colorMode, ranges, heightFilter, scale, is3D, onSelectBuilding, onViewCounts };
 
   useEffect(() => {
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: CITY_CONFIG.basemapStyle,
-      center: CITY_CONFIG.center,
-      zoom: CITY_CONFIG.zoom,
-      pitch: CITY_CONFIG.pitch,
-      bearing: CITY_CONFIG.bearing,
-      antialias: true,
-    });
+    // MapLibre needs WebGL; on devices/browsers without it the constructor
+    // either throws or silently produces a canvas that never paints
+    // anything, which looks identical to a network failure from the outside.
+    let map;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: CITY_CONFIG.basemapStyle,
+        center: CITY_CONFIG.center,
+        zoom: CITY_CONFIG.zoom,
+        pitch: CITY_CONFIG.pitch,
+        bearing: CITY_CONFIG.bearing,
+        antialias: true,
+      });
+    } catch (err) {
+      console.error("Failed to create MapLibre map:", err);
+      onError?.(`Failed to initialize the map: ${err.message}`);
+      return;
+    }
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 140, unit: "metric" }), "bottom-left");
 
@@ -58,6 +68,14 @@ export default function MapView({
       console.error("MapLibre error:", e?.error || e);
       onError?.(e?.error?.message || "Failed to load the map. Check your network connection.");
     });
+
+    // Some failure modes (e.g. a lost/never-created WebGL context) never
+    // fire 'error' or 'load' at all, so fall back to a plain timeout.
+    const loadTimeout = setTimeout(() => {
+      if (!mapLoadedRef.current) {
+        onError?.("The map is taking unusually long to load — it may have failed silently (try reloading).");
+      }
+    }, 12000);
 
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     mapRef.current = map;
@@ -73,6 +91,7 @@ export default function MapView({
 
     const start = () => {
       mapLoadedRef.current = true;
+      clearTimeout(loadTimeout);
       map.addControl(overlay);
       map.on("click", handleMapClick);
       rebuildLayer();
@@ -82,6 +101,7 @@ export default function MapView({
     else map.once("load", start);
 
     return () => {
+      clearTimeout(loadTimeout);
       map.remove();
       mapRef.current = null;
       overlayRef.current = null;
