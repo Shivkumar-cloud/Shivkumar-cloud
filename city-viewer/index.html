@@ -16,14 +16,19 @@
     </header>
 
     <section id="panel">
+      <div class="panel-group mode-group">
+        <button id="mode-procedural" class="active">🏙️ Procedural City</button>
+        <button id="mode-pune">🕌 Real Pune, India</button>
+      </div>
+
       <div class="panel-group">
-        <button id="regenerate">🏙️ Regenerate City</button>
-        <button id="toggle-day">🌗 Toggle Day / Night</button>
-        <button id="toggle-wireframe">🔲 Toggle Wireframe</button>
+        <button id="regenerate">🔁 Regenerate</button>
+        <button id="toggle-day">🌗 Day / Night</button>
+        <button id="toggle-wireframe">🔲 Wireframe</button>
         <button id="reset-camera">🎯 Reset Camera</button>
       </div>
 
-      <div class="panel-group slider-group">
+      <div class="panel-group slider-group" id="citySizeGroup">
         <label for="citySize">City size: <span id="citySizeValue">12</span></label>
         <input type="range" id="citySize" min="4" max="24" step="1" value="12" />
       </div>
@@ -32,12 +37,13 @@
     <aside id="info" class="hidden">
       <button id="info-close" aria-label="Close">&times;</button>
       <h2 id="info-title">Building</h2>
-      <dl>
+      <dl id="info-stats">
         <dt>Height</dt><dd id="info-height">-</dd>
         <dt>Floors</dt><dd id="info-floors">-</dd>
         <dt>Footprint</dt><dd id="info-footprint">-</dd>
         <dt>District</dt><dd id="info-district">-</dd>
       </dl>
+      <p id="info-description" class="hidden"></p>
     </aside>
 
     <div id="loading">Loading city…</div>

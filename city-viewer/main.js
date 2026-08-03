@@ -1,11 +1,13 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PUNE_DISTRICTS, PUNE_LANDMARKS, DISTRICT_PROFILES, projectLatLng } from "./pune-data.js";
 
 const canvas = document.getElementById("scene");
 const loadingEl = document.getElementById("loading");
 const infoEl = document.getElementById("info");
 const citySizeInput = document.getElementById("citySize");
 const citySizeValue = document.getElementById("citySizeValue");
+const citySizeGroup = document.getElementById("citySizeGroup");
 
 const DISTRICTS = [
   { name: "Downtown", colors: [0x3a4a63, 0x455b7a, 0x54688a, 0x2e3a4f], minFloors: 12, maxFloors: 34 },
@@ -21,10 +23,13 @@ let renderer, scene, camera, controls;
 let cityGroup;
 let raycaster, pointer;
 let buildings = [];
+let landmarkMeshes = [];
 let selected = null;
 let isDay = true;
 let isWireframe = false;
 let sunLight, hemiLight, skyMesh;
+let mode = "procedural";
+let puneRadiusUnits = 90;
 
 init();
 
@@ -54,18 +59,40 @@ function init() {
   buildLights();
   buildGround();
   buildCity(parseInt(citySizeInput.value, 10));
+  updateModeUI();
 
   window.addEventListener("resize", onResize);
   renderer.domElement.addEventListener("pointerdown", onPointerDown);
-  document.getElementById("regenerate").addEventListener("click", () => buildCity(parseInt(citySizeInput.value, 10)));
+  document.getElementById("regenerate").addEventListener("click", () => {
+    if (mode === "pune") {
+      buildPuneCity();
+    } else {
+      buildCity(parseInt(citySizeInput.value, 10));
+    }
+  });
   document.getElementById("toggle-day").addEventListener("click", toggleDayNight);
   document.getElementById("toggle-wireframe").addEventListener("click", toggleWireframe);
   document.getElementById("reset-camera").addEventListener("click", resetCamera);
-  document.getElementById("info-close").addEventListener("click", () => selectBuilding(null));
+  document.getElementById("info-close").addEventListener("click", () => selectEntity(null));
+  document.getElementById("mode-procedural").addEventListener("click", () => {
+    if (mode === "procedural") return;
+    mode = "procedural";
+    updateModeUI();
+    buildCity(parseInt(citySizeInput.value, 10));
+    resetCamera();
+  });
+  document.getElementById("mode-pune").addEventListener("click", () => {
+    if (mode === "pune") return;
+    mode = "pune";
+    updateModeUI();
+    buildPuneCity();
+    resetCamera();
+  });
   citySizeInput.addEventListener("input", () => {
     citySizeValue.textContent = citySizeInput.value;
   });
   citySizeInput.addEventListener("change", () => {
+    if (mode !== "procedural") return;
     const size = parseInt(citySizeInput.value, 10);
     buildCity(size);
     resetCamera();
@@ -81,10 +108,27 @@ function setDefaultCameraPosition(gridSize = 12) {
   camera.position.set(radius, radius * 0.8, radius);
 }
 
+function setCameraRadius(radius) {
+  camera.position.set(radius, radius * 0.8, radius);
+}
+
 function resetCamera() {
-  setDefaultCameraPosition(parseInt(citySizeInput.value, 10));
+  if (mode === "pune") {
+    setCameraRadius(puneRadiusUnits);
+  } else {
+    setDefaultCameraPosition(parseInt(citySizeInput.value, 10));
+  }
   controls.target.set(0, 4, 0);
   controls.update();
+}
+
+function updateModeUI() {
+  document.getElementById("mode-procedural").classList.toggle("active", mode === "procedural");
+  document.getElementById("mode-pune").classList.toggle("active", mode === "pune");
+  citySizeGroup.classList.toggle("hidden", mode !== "procedural");
+  controls.maxDistance = mode === "pune" ? 350 : 200;
+  scene.fog.near = mode === "pune" ? 40 : 60;
+  scene.fog.far = mode === "pune" ? 260 : 160;
 }
 
 function buildSky() {
@@ -127,15 +171,19 @@ function districtFor(gx, gz, half) {
   return DISTRICTS[idx % DISTRICTS.length];
 }
 
-function buildCity(gridSize) {
+function clearCity() {
   if (cityGroup) {
     scene.remove(cityGroup);
     disposeGroup(cityGroup);
   }
   buildings = [];
-  selectBuilding(null);
-
+  landmarkMeshes = [];
+  selectEntity(null);
   cityGroup = new THREE.Group();
+}
+
+function buildCity(gridSize) {
+  clearCity();
   const half = Math.floor(gridSize / 2);
 
   const roadMat = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.9 });
@@ -206,6 +254,215 @@ function buildCity(gridSize) {
   scene.add(cityGroup);
 }
 
+function buildPuneCity() {
+  clearCity();
+
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.9 });
+
+  // Trunk roads from the historic center (Shaniwar Wada, at the origin) out to
+  // every district and landmark, following the real straight-line bearing.
+  const allPlaces = [
+    ...PUNE_DISTRICTS.map((d) => ({ ...d, kind: "district" })),
+    ...PUNE_LANDMARKS.filter((l) => l.id !== "shaniwarwada").map((l) => ({ ...l, kind: "landmark" })),
+  ];
+
+  let maxDist = 40;
+  for (const place of allPlaces) {
+    const { x, z } = projectLatLng(place.lat, place.lng);
+    place._x = x;
+    place._z = z;
+    maxDist = Math.max(maxDist, Math.hypot(x, z));
+    buildTrunkRoad(roadMat, 0, 0, x, z);
+  }
+  puneRadiusUnits = Math.min(300, Math.max(50, maxDist * 1.1));
+
+  for (const district of allPlaces.filter((p) => p.kind === "district")) {
+    buildDistrictCluster(district);
+  }
+
+  for (const landmark of PUNE_LANDMARKS) {
+    const { x, z } = landmark.id === "shaniwarwada" ? { x: 0, z: 0 } : projectLatLng(landmark.lat, landmark.lng);
+    buildLandmark(landmark, x, z);
+  }
+
+  scene.add(cityGroup);
+}
+
+function buildTrunkRoad(roadMat, x1, z1, x2, z2) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const length = Math.hypot(dx, dz);
+  if (length < 0.5) return;
+
+  const roadGeo = new THREE.PlaneGeometry(length, 1.4);
+  const road = new THREE.Mesh(roadGeo, roadMat);
+  road.rotation.x = -Math.PI / 2;
+  road.rotation.z = -Math.atan2(dz, dx);
+  road.position.set((x1 + x2) / 2, 0.01, (z1 + z2) / 2);
+  road.receiveShadow = true;
+  cityGroup.add(road);
+}
+
+function buildDistrictCluster(district) {
+  const profile = DISTRICT_PROFILES[district.profile];
+  const half = profile.cellHalf;
+  const { x: originX, z: originZ } = { x: district._x, z: district._z };
+
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.9 });
+  const roadSize = (half * 2 + 1) * BLOCK_SPACING;
+  for (let i = -half; i <= half; i++) {
+    const lineX = new THREE.Mesh(new THREE.PlaneGeometry(roadSize, 0.7), roadMat);
+    lineX.rotation.x = -Math.PI / 2;
+    lineX.position.set(originX, 0.015, originZ + i * BLOCK_SPACING);
+    lineX.receiveShadow = true;
+    cityGroup.add(lineX);
+
+    const lineZ = new THREE.Mesh(new THREE.PlaneGeometry(0.7, roadSize), roadMat);
+    lineZ.rotation.x = -Math.PI / 2;
+    lineZ.position.set(originX + i * BLOCK_SPACING, 0.015, originZ);
+    lineZ.receiveShadow = true;
+    cityGroup.add(lineZ);
+  }
+
+  for (let gx = -half; gx < half; gx++) {
+    for (let gz = -half; gz < half; gz++) {
+      if (Math.random() < 0.15) {
+        if (profile.trees) addTree(originX + gx * BLOCK_SPACING + BLOCK_SPACING / 2, originZ + gz * BLOCK_SPACING + BLOCK_SPACING / 2);
+        continue;
+      }
+
+      const floors = Math.floor(profile.minFloors + Math.random() * (profile.maxFloors - profile.minFloors));
+      const height = Math.max(1, floors) * FLOOR_HEIGHT;
+      const width = 1.6 + Math.random() * 1.1;
+      const depth = 1.6 + Math.random() * 1.1;
+      const color = profile.colors[Math.floor(Math.random() * profile.colors.length)];
+
+      const geo = new THREE.BoxGeometry(width, height, depth);
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.1, wireframe: isWireframe });
+      const mesh = new THREE.Mesh(geo, mat);
+
+      const cx = originX + gx * BLOCK_SPACING + BLOCK_SPACING / 2 + (Math.random() - 0.5) * 0.5;
+      const cz = originZ + gz * BLOCK_SPACING + BLOCK_SPACING / 2 + (Math.random() - 0.5) * 0.5;
+      mesh.position.set(cx, height / 2, cz);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+
+      mesh.userData = {
+        isBuilding: true,
+        title: `${district.name} Building`,
+        height: height.toFixed(1),
+        floors,
+        footprint: `${width.toFixed(1)}m × ${depth.toFixed(1)}m`,
+        district: district.name,
+        description: district.description,
+      };
+
+      cityGroup.add(mesh);
+      buildings.push(mesh);
+
+      if (Math.random() < 0.5) addRooftopDetail(mesh, width, depth, height);
+    }
+  }
+}
+
+function addTree(x, z) {
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.08, 0.5, 6),
+    new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.9 })
+  );
+  trunk.position.set(x, 0.25, z);
+  trunk.castShadow = true;
+
+  const canopy = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0x3f6b3a, roughness: 0.8 })
+  );
+  canopy.position.set(x, 0.8, z);
+  canopy.castShadow = true;
+
+  cityGroup.add(trunk, canopy);
+}
+
+function registerLandmarkMesh(mesh, landmark) {
+  mesh.userData = { isLandmark: true, title: landmark.name, description: landmark.description };
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  cityGroup.add(mesh);
+  landmarkMeshes.push(mesh);
+}
+
+function buildLandmark(landmark, x, z) {
+  if (landmark.kind === "fort") {
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x8b4a3a, roughness: 0.85 });
+    const wallSize = 5;
+    const wallHeight = 1.4;
+    const positions = [
+      [0, -wallSize / 2, wallSize, 0.4],
+      [0, wallSize / 2, wallSize, 0.4],
+      [-wallSize / 2, 0, 0.4, wallSize],
+      [wallSize / 2, 0, 0.4, wallSize],
+    ];
+    for (const [dx, dz, w, d] of positions) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, wallHeight, d), wallMat);
+      wall.position.set(x + dx, wallHeight / 2, z + dz);
+      registerLandmarkMesh(wall, landmark);
+    }
+    const corners = [
+      [-wallSize / 2, -wallSize / 2],
+      [-wallSize / 2, wallSize / 2],
+      [wallSize / 2, -wallSize / 2],
+      [wallSize / 2, wallSize / 2],
+    ];
+    for (const [dx, dz] of corners) {
+      const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 2.2, 8), wallMat);
+      tower.position.set(x + dx, 1.1, z + dz);
+      registerLandmarkMesh(tower, landmark);
+    }
+  } else if (landmark.kind === "palace") {
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xf0e6d2, roughness: 0.7 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4, 2.2, 3), wallMat);
+    body.position.set(x, 1.1, z);
+    registerLandmarkMesh(body, landmark);
+
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), wallMat);
+    dome.position.set(x, 2.2, z);
+    registerLandmarkMesh(dome, landmark);
+  } else if (landmark.kind === "hill") {
+    const hillMat = new THREE.MeshStandardMaterial({ color: 0x5c6b3f, roughness: 1 });
+    const hill = new THREE.Mesh(new THREE.ConeGeometry(4, 3, 16), hillMat);
+    hill.position.set(x, 1.5, z);
+    registerLandmarkMesh(hill, landmark);
+
+    const templeMat = new THREE.MeshStandardMaterial({ color: 0xd9c9a3, roughness: 0.7 });
+    const temple = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), templeMat);
+    temple.position.set(x, 3.4, z);
+    registerLandmarkMesh(temple, landmark);
+
+    const spire = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1, 8), templeMat);
+    spire.position.set(x, 4.3, z);
+    registerLandmarkMesh(spire, landmark);
+  } else if (landmark.kind === "campus") {
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0xcac2ab, roughness: 0.75 });
+    const mainBuilding = new THREE.Mesh(new THREE.BoxGeometry(5, 1.6, 1.8), stoneMat);
+    mainBuilding.position.set(x, 0.8, z);
+    registerLandmarkMesh(mainBuilding, landmark);
+
+    for (let i = -2; i <= 2; i++) {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.6, 8), stoneMat);
+      pillar.position.set(x + i * 0.9, 0.8, z + 1.1);
+      registerLandmarkMesh(pillar, landmark);
+    }
+
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.9), stoneMat);
+    tower.position.set(x, 2.2, z);
+    registerLandmarkMesh(tower, landmark);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.8, 4), stoneMat);
+    roof.rotation.y = Math.PI / 4;
+    roof.position.set(x, 3.2, z);
+    registerLandmarkMesh(roof, landmark);
+  }
+}
+
 function addRooftopDetail(building, width, depth, height) {
   const detailGeo = new THREE.BoxGeometry(width * 0.3, 0.4, depth * 0.3);
   const detailMat = new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.8 });
@@ -230,6 +487,9 @@ function toggleWireframe() {
   isWireframe = !isWireframe;
   buildings.forEach((b) => {
     b.material.wireframe = isWireframe;
+  });
+  landmarkMeshes.forEach((m) => {
+    m.material.wireframe = isWireframe;
   });
 }
 
@@ -256,16 +516,16 @@ function onPointerDown(event) {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
   raycaster.setFromCamera(pointer, camera);
-  const intersects = raycaster.intersectObjects(buildings, false);
+  const intersects = raycaster.intersectObjects([...buildings, ...landmarkMeshes], false);
 
   if (intersects.length > 0) {
-    selectBuilding(intersects[0].object);
+    selectEntity(intersects[0].object);
   } else {
-    selectBuilding(null);
+    selectEntity(null);
   }
 }
 
-function selectBuilding(mesh) {
+function selectEntity(mesh) {
   if (selected) {
     selected.material.emissive?.setHex(0x000000);
   }
@@ -280,11 +540,30 @@ function selectBuilding(mesh) {
   mesh.material.emissive = new THREE.Color(0x5fb4ff);
   mesh.material.emissiveIntensity = 0.35;
 
-  document.getElementById("info-title").textContent = `${mesh.userData.district} Building`;
-  document.getElementById("info-height").textContent = `${mesh.userData.height} m`;
-  document.getElementById("info-floors").textContent = mesh.userData.floors;
-  document.getElementById("info-footprint").textContent = mesh.userData.footprint;
-  document.getElementById("info-district").textContent = mesh.userData.district;
+  const data = mesh.userData;
+  document.getElementById("info-title").textContent = data.title || `${data.district} Building`;
+
+  const statsEl = document.getElementById("info-stats");
+  const descEl = document.getElementById("info-description");
+
+  if (data.isLandmark) {
+    statsEl.classList.add("hidden");
+    descEl.textContent = data.description || "";
+    descEl.classList.remove("hidden");
+  } else {
+    statsEl.classList.remove("hidden");
+    document.getElementById("info-height").textContent = `${data.height} m`;
+    document.getElementById("info-floors").textContent = data.floors;
+    document.getElementById("info-footprint").textContent = data.footprint;
+    document.getElementById("info-district").textContent = data.district;
+    if (data.description) {
+      descEl.textContent = data.description;
+      descEl.classList.remove("hidden");
+    } else {
+      descEl.classList.add("hidden");
+    }
+  }
+
   infoEl.classList.remove("hidden");
 }
 
