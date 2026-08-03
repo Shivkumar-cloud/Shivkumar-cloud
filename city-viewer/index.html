@@ -32,6 +32,13 @@
         <label for="citySize">City size: <span id="citySizeValue">12</span></label>
         <input type="range" id="citySize" min="4" max="24" step="1" value="12" />
       </div>
+
+      <div class="panel-group slider-group hidden" id="googleGroup">
+        <label for="googleKey">Google Maps API key (optional, stays in your browser)</label>
+        <input type="password" id="googleKey" placeholder="Paste your API key" autocomplete="off" />
+        <button id="fetch-roads">🛣️ Fetch Real Roads (Google)</button>
+        <p id="roads-status" class="status-text"></p>
+      </div>
     </section>
 
     <aside id="info" class="hidden">

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { PUNE_DISTRICTS, PUNE_LANDMARKS, DISTRICT_PROFILES, projectLatLng } from "./pune-data.js";
+import { PUNE_ORIGIN, PUNE_DISTRICTS, PUNE_LANDMARKS, DISTRICT_PROFILES, projectLatLng } from "./pune-data.js";
 
 const canvas = document.getElementById("scene");
 const loadingEl = document.getElementById("loading");
@@ -8,6 +8,11 @@ const infoEl = document.getElementById("info");
 const citySizeInput = document.getElementById("citySize");
 const citySizeValue = document.getElementById("citySizeValue");
 const citySizeGroup = document.getElementById("citySizeGroup");
+const googleGroup = document.getElementById("googleGroup");
+const googleKeyInput = document.getElementById("googleKey");
+const fetchRoadsBtn = document.getElementById("fetch-roads");
+const roadsStatusEl = document.getElementById("roads-status");
+const GOOGLE_KEY_STORAGE = "puneGoogleMapsKey";
 
 const DISTRICTS = [
   { name: "Downtown", colors: [0x3a4a63, 0x455b7a, 0x54688a, 0x2e3a4f], minFloors: 12, maxFloors: 34 },
@@ -30,6 +35,8 @@ let isWireframe = false;
 let sunLight, hemiLight, skyMesh;
 let mode = "procedural";
 let puneRadiusUnits = 90;
+let currentRoadPaths = {};
+let googleMapsLoadPromise = null;
 
 init();
 
@@ -97,6 +104,10 @@ function init() {
     buildCity(size);
     resetCamera();
   });
+  fetchRoadsBtn.addEventListener("click", onFetchRoadsClick);
+
+  const savedKey = localStorage.getItem(GOOGLE_KEY_STORAGE);
+  if (savedKey) googleKeyInput.value = savedKey;
 
   onResize();
   requestAnimationFrame(animate);
@@ -126,6 +137,7 @@ function updateModeUI() {
   document.getElementById("mode-procedural").classList.toggle("active", mode === "procedural");
   document.getElementById("mode-pune").classList.toggle("active", mode === "pune");
   citySizeGroup.classList.toggle("hidden", mode !== "procedural");
+  googleGroup.classList.toggle("hidden", mode !== "pune");
   controls.maxDistance = mode === "pune" ? 350 : 200;
   scene.fog.near = mode === "pune" ? 40 : 60;
   scene.fog.far = mode === "pune" ? 260 : 160;
@@ -254,13 +266,16 @@ function buildCity(gridSize) {
   scene.add(cityGroup);
 }
 
-function buildPuneCity() {
+function buildPuneCity(roadPaths = currentRoadPaths) {
   clearCity();
+  currentRoadPaths = roadPaths;
 
   const roadMat = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.9 });
 
   // Trunk roads from the historic center (Shaniwar Wada, at the origin) out to
-  // every district and landmark, following the real straight-line bearing.
+  // every district and landmark. Uses a real Google-routed polyline when one
+  // has been fetched for that place, otherwise falls back to a straight line
+  // along the real-world bearing.
   const allPlaces = [
     ...PUNE_DISTRICTS.map((d) => ({ ...d, kind: "district" })),
     ...PUNE_LANDMARKS.filter((l) => l.id !== "shaniwarwada").map((l) => ({ ...l, kind: "landmark" })),
@@ -272,7 +287,13 @@ function buildPuneCity() {
     place._x = x;
     place._z = z;
     maxDist = Math.max(maxDist, Math.hypot(x, z));
-    buildTrunkRoad(roadMat, 0, 0, x, z);
+
+    const path = roadPaths[place.id];
+    if (path && path.length >= 2) {
+      buildRoadPath(roadMat, path);
+    } else {
+      buildTrunkRoad(roadMat, 0, 0, x, z);
+    }
   }
   puneRadiusUnits = Math.min(300, Math.max(50, maxDist * 1.1));
 
@@ -301,6 +322,106 @@ function buildTrunkRoad(roadMat, x1, z1, x2, z2) {
   road.position.set((x1 + x2) / 2, 0.01, (z1 + z2) / 2);
   road.receiveShadow = true;
   cityGroup.add(road);
+}
+
+function buildRoadPath(roadMat, points) {
+  for (let i = 0; i < points.length - 1; i++) {
+    buildTrunkRoad(roadMat, points[i].x, points[i].z, points[i + 1].x, points[i + 1].z);
+  }
+}
+
+function decimatePath(points, maxPoints = 40) {
+  if (points.length <= maxPoints) return points;
+  const step = Math.ceil(points.length / maxPoints);
+  const result = points.filter((_, i) => i % step === 0);
+  if (result[result.length - 1] !== points[points.length - 1]) result.push(points[points.length - 1]);
+  return result;
+}
+
+function loadGoogleMapsScript(apiKey) {
+  if (window.google && window.google.maps && window.google.maps.DirectionsService) {
+    return Promise.resolve();
+  }
+  if (googleMapsLoadPromise) return googleMapsLoadPromise;
+
+  googleMapsLoadPromise = new Promise((resolve, reject) => {
+    const callbackName = "__puneGoogleMapsReady";
+    window[callbackName] = () => resolve();
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&callback=${callbackName}&loading=async`;
+    script.async = true;
+    script.onerror = () => {
+      googleMapsLoadPromise = null;
+      reject(new Error("Couldn't load the Google Maps script (check your network and API key)."));
+    };
+    document.head.appendChild(script);
+  });
+  return googleMapsLoadPromise;
+}
+
+function fetchRoutePoints(directionsService, origin, destination) {
+  return new Promise((resolve, reject) => {
+    directionsService.route(
+      { origin, destination, travelMode: google.maps.TravelMode.DRIVING },
+      (result, status) => {
+        if (status === "OK" && result.routes[0]) {
+          resolve(result.routes[0].overview_path.map((p) => ({ lat: p.lat(), lng: p.lng() })));
+        } else {
+          reject(new Error(status));
+        }
+      }
+    );
+  });
+}
+
+async function fetchAllGoogleRoads(apiKey) {
+  await loadGoogleMapsScript(apiKey);
+  const directionsService = new google.maps.DirectionsService();
+
+  const targets = [
+    ...PUNE_DISTRICTS.map((d) => ({ id: d.id, name: d.name, lat: d.lat, lng: d.lng })),
+    ...PUNE_LANDMARKS.filter((l) => l.id !== "shaniwarwada").map((l) => ({ id: l.id, name: l.name, lat: l.lat, lng: l.lng })),
+  ];
+
+  const roads = {};
+  const failed = [];
+  for (const target of targets) {
+    try {
+      const path = await fetchRoutePoints(directionsService, PUNE_ORIGIN, { lat: target.lat, lng: target.lng });
+      roads[target.id] = decimatePath(path.map((p) => projectLatLng(p.lat, p.lng)));
+    } catch (err) {
+      failed.push(target.name);
+    }
+  }
+  return { roads, succeeded: targets.length - failed.length, total: targets.length, failed };
+}
+
+async function onFetchRoadsClick() {
+  const apiKey = googleKeyInput.value.trim();
+  if (!apiKey) {
+    roadsStatusEl.textContent = "Enter an API key first.";
+    return;
+  }
+  localStorage.setItem(GOOGLE_KEY_STORAGE, apiKey);
+
+  fetchRoadsBtn.disabled = true;
+  roadsStatusEl.textContent = "Loading real roads from Google…";
+  try {
+    const { roads, succeeded, total, failed } = await fetchAllGoogleRoads(apiKey);
+    buildPuneCity(roads);
+    if (succeeded === 0) {
+      roadsStatusEl.textContent =
+        "Google didn't return any routes — check the API key is valid, billing is enabled, and Maps JavaScript API + Directions API are turned on for it.";
+    } else {
+      roadsStatusEl.textContent =
+        `Loaded ${succeeded}/${total} real routes from Google.` +
+        (failed.length ? ` Couldn't route to: ${failed.join(", ")}.` : "");
+    }
+  } catch (err) {
+    roadsStatusEl.textContent = `Couldn't load Google Maps: ${err.message}`;
+  } finally {
+    fetchRoadsBtn.disabled = false;
+  }
 }
 
 function buildDistrictCluster(district) {

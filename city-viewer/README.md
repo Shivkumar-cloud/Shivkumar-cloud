@@ -34,3 +34,12 @@ python3 -m http.server 8000
 ## About the Pune data
 
 Coordinates in `pune-data.js` are approximate real-world values, not fetched from a live GIS/mapping API (this project has no network dependency at build or runtime). They're accurate enough to place each neighborhood at the correct real bearing and roughly correct real distance from Shaniwar Wada, and the scene scale is compressed (1 unit = 220m) so the ~15km-wide metro area fits in view. Exact per-building footprints aren't real data — those are still procedurally generated within each real neighborhood's boundary.
+
+## Optional: real roads via Google Maps
+
+In Pune mode, an optional panel lets you paste a Google Maps Platform API key and click **"Fetch Real Roads (Google)"**. This calls the Directions API (client-side, straight from your browser) to fetch the actual driving route from Shaniwar Wada to each neighborhood/landmark, and redraws the connecting roads to follow that real path instead of a straight line. Regenerating or switching modes afterward keeps the fetched roads; fetching again re-queries Google.
+
+- The key is never committed to the repo — it's typed into the page and saved only in your own browser's `localStorage`.
+- Setup: in [Google Cloud Console](https://console.cloud.google.com), enable **Maps JavaScript API** and **Directions API** for a project with billing enabled, then create an API key under **APIs & Services → Credentials**.
+- Restrict the key (HTTP referrer = your deployed URL, API restriction = just those two APIs) so it can't be used elsewhere if someone reads your page source.
+- If no key is entered, or a request fails, the viewer silently falls back to the straight-line roads — nothing breaks.
