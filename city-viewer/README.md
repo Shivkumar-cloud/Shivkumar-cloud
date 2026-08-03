@@ -43,3 +43,11 @@ In Pune mode, an optional panel lets you paste a Google Maps Platform API key an
 - Setup: in [Google Cloud Console](https://console.cloud.google.com), enable **Maps JavaScript API** and **Directions API** for a project with billing enabled, then create an API key under **APIs & Services → Credentials**.
 - Restrict the key (HTTP referrer = your deployed URL, API restriction = just those two APIs) so it can't be used elsewhere if someone reads your page source.
 - If no key is entered, or a request fails, the viewer silently falls back to the straight-line roads — nothing breaks.
+
+## Optional: real building footprints via OpenStreetMap
+
+Also in Pune mode, clicking **"Load Real Buildings (OpenStreetMap)"** fetches actual building footprints (via the free, keyless Overpass API) within ~400m of Shaniwar Wada and renders their real outlines and heights — including named buildings like Lal Mahal or Sardar Shitole Wada where OSM has tagged them — instead of generic boxes. This replaces the stylized fort placeholder for that area once loaded.
+
+- No API key or billing needed — Overpass is free and public.
+- **Scale note:** this patch uses its own exaggerated local scale (`CORE_METERS_PER_UNIT` in `osm-buildings.js`, currently 35m/unit) rather than the city-wide 220m/unit scale, so individual buildings are actually visible/clickable. Real relative position, shape, and height *within* the patch are accurate; its size relative to the rest of the (already-compressed) city is intentionally exaggerated for legibility — the same "zoomed schematic bubble" idea used for every district cluster, just applied to real geometry.
+- Currently scoped to the Shaniwar Wada area only. Doing this for all of Pune isn't practical in a browser scene — real building counts in a dense city are in the hundreds of thousands, far beyond what a client-rendered Three.js scene can hold.

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PUNE_ORIGIN, PUNE_DISTRICTS, PUNE_LANDMARKS, DISTRICT_PROFILES, projectLatLng } from "./pune-data.js";
+import { CORE_METERS_PER_UNIT, projectCore, fetchOsmBuildings } from "./osm-buildings.js";
 
 const canvas = document.getElementById("scene");
 const loadingEl = document.getElementById("loading");
@@ -13,6 +14,8 @@ const googleKeyInput = document.getElementById("googleKey");
 const fetchRoadsBtn = document.getElementById("fetch-roads");
 const roadsStatusEl = document.getElementById("roads-status");
 const GOOGLE_KEY_STORAGE = "puneGoogleMapsKey";
+const fetchOsmBtn = document.getElementById("fetch-osm");
+const osmStatusEl = document.getElementById("osm-status");
 
 const DISTRICTS = [
   { name: "Downtown", colors: [0x3a4a63, 0x455b7a, 0x54688a, 0x2e3a4f], minFloors: 12, maxFloors: 34 },
@@ -37,6 +40,8 @@ let mode = "procedural";
 let puneRadiusUnits = 90;
 let currentRoadPaths = {};
 let googleMapsLoadPromise = null;
+let osmBuildingsData = null;
+let osmBuildingMeshes = [];
 
 init();
 
@@ -105,6 +110,7 @@ function init() {
     resetCamera();
   });
   fetchRoadsBtn.addEventListener("click", onFetchRoadsClick);
+  fetchOsmBtn.addEventListener("click", onFetchOsmClick);
 
   const savedKey = localStorage.getItem(GOOGLE_KEY_STORAGE);
   if (savedKey) googleKeyInput.value = savedKey;
@@ -302,11 +308,15 @@ function buildPuneCity(roadPaths = currentRoadPaths) {
   }
 
   for (const landmark of PUNE_LANDMARKS) {
+    // Skip the stylized fort placeholder once real OSM footprints are loaded —
+    // they cover the same ground and would otherwise overlap/z-fight.
+    if (landmark.id === "shaniwarwada" && osmBuildingsData) continue;
     const { x, z } = landmark.id === "shaniwarwada" ? { x: 0, z: 0 } : projectLatLng(landmark.lat, landmark.lng);
     buildLandmark(landmark, x, z);
   }
 
   scene.add(cityGroup);
+  renderOsmBuildings();
 }
 
 function buildTrunkRoad(roadMat, x1, z1, x2, z2) {
@@ -422,6 +432,80 @@ async function onFetchRoadsClick() {
     roadsStatusEl.textContent = `Couldn't load Google Maps: ${err.message}`;
   } finally {
     fetchRoadsBtn.disabled = false;
+  }
+}
+
+function clearOsmBuildingMeshes() {
+  for (const mesh of osmBuildingMeshes) {
+    if (cityGroup) cityGroup.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+    const li = landmarkMeshes.indexOf(mesh);
+    if (li !== -1) landmarkMeshes.splice(li, 1);
+  }
+  osmBuildingMeshes = [];
+}
+
+function addOsmBuildingMesh(b) {
+  const shape = new THREE.Shape();
+  b.ring.forEach((pt, i) => {
+    const { x, z } = projectCore(pt.lat, pt.lng, PUNE_ORIGIN);
+    if (i === 0) shape.moveTo(x, -z);
+    else shape.lineTo(x, -z);
+  });
+  shape.closePath();
+
+  const heightMeters = b.heightMeters || (b.levels ? b.levels * 3 : 6);
+  const height = Math.max(0.3, heightMeters / CORE_METERS_PER_UNIT);
+
+  let geometry;
+  try {
+    geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+  } catch {
+    return; // a handful of OSM ways are self-intersecting/degenerate; skip those
+  }
+  geometry.rotateX(-Math.PI / 2);
+
+  const color = b.historic ? 0x9c5b3f : b.name ? 0xd9c9a3 : 0xb9ac95;
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.75, wireframe: isWireframe });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData = {
+    isLandmark: true,
+    title: b.name || (b.historic ? `Historic building (${b.historic})` : "Building"),
+    description: b.name
+      ? `Real building footprint from OpenStreetMap${b.historic ? `, tagged historic: ${b.historic}` : ""}.`
+      : "An unnamed real building footprint from OpenStreetMap.",
+  };
+
+  cityGroup.add(mesh);
+  landmarkMeshes.push(mesh);
+  osmBuildingMeshes.push(mesh);
+}
+
+function renderOsmBuildings() {
+  clearOsmBuildingMeshes();
+  if (!osmBuildingsData) return;
+  for (const b of osmBuildingsData) addOsmBuildingMesh(b);
+}
+
+async function onFetchOsmClick() {
+  fetchOsmBtn.disabled = true;
+  osmStatusEl.textContent = "Loading real building footprints from OpenStreetMap…";
+  try {
+    osmBuildingsData = await fetchOsmBuildings(PUNE_ORIGIN);
+    // Full rebuild (not just renderOsmBuildings) so the stylized fort
+    // placeholder gets dropped now that real footprints cover that ground.
+    buildPuneCity();
+    const named = osmBuildingsData.filter((b) => b.name).length;
+    osmStatusEl.textContent =
+      `Loaded ${osmBuildingsData.length} real building footprints around Shaniwar Wada` +
+      (named ? ` (${named} named, e.g. try clicking near the fort).` : ".");
+  } catch (err) {
+    osmStatusEl.textContent = `Couldn't load OpenStreetMap data: ${err.message}`;
+  } finally {
+    fetchOsmBtn.disabled = false;
   }
 }
 
