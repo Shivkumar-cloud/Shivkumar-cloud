@@ -33,6 +33,28 @@ function ringsOf(geometry) {
   throw new Error(`Unsupported geometry type for .poly conversion: ${geometry.type}`);
 }
 
+// A real city-level administrative boundary spans several kilometers in
+// every direction. Nominatim can match a query like "Pune Municipal
+// Corporation" to an unrelated small way (e.g. a single building or office)
+// sharing similar words in its name, which would silently produce a
+// near-empty extract. Reject anything smaller than this before accepting it.
+const MIN_CITY_SPAN_DEG = 0.05;
+
+function bboxOf(geometry) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const rings of ringsOf(geometry)) {
+    for (const ring of rings) {
+      for (const [x, y] of ring) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  return { width: maxX - minX, height: maxY - minY };
+}
+
 function geojsonToPoly(geometry, name) {
   const polygons = ringsOf(geometry);
   const lines = [name];
@@ -60,17 +82,35 @@ async function main() {
 
   try {
     const url =
-      "https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=1&q=" +
+      "https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=5&q=" +
       encodeURIComponent(QUERY);
     const res = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "pune-typology-explorer-pipeline" } });
     if (!res.ok) throw new Error(`Nominatim HTTP ${res.status}`);
     const results = await res.json();
-    const match = results[0];
-    if (match?.geojson && (match.geojson.type === "Polygon" || match.geojson.type === "MultiPolygon")) {
-      geometry = match.geojson;
-      source = `nominatim:${match.osm_type}/${match.osm_id}`;
+    const candidates = results.filter(
+      (r) => r.geojson && (r.geojson.type === "Polygon" || r.geojson.type === "MultiPolygon")
+    );
+    // Real administrative boundaries are (multi)polygon relations, not ways
+    // or nodes; prefer an actual boundary=administrative relation, then any
+    // relation, then whatever polygon Nominatim ranked first.
+    const chosen =
+      candidates.find((r) => r.osm_type === "relation" && r.class === "boundary" && r.type === "administrative") ||
+      candidates.find((r) => r.osm_type === "relation") ||
+      candidates[0];
+
+    if (!chosen) {
+      console.error("fetch-boundary: Nominatim returned no polygon boundaries; using fallback bbox.");
     } else {
-      console.error("fetch-boundary: Nominatim did not return a polygon boundary; using fallback bbox.");
+      const { width, height } = bboxOf(chosen.geojson);
+      if (width < MIN_CITY_SPAN_DEG || height < MIN_CITY_SPAN_DEG) {
+        console.error(
+          `fetch-boundary: matched ${chosen.osm_type}/${chosen.osm_id} but its extent ` +
+            `(${width.toFixed(4)}° x ${height.toFixed(4)}°) is too small for a city boundary; using fallback bbox.`
+        );
+      } else {
+        geometry = chosen.geojson;
+        source = `nominatim:${chosen.osm_type}/${chosen.osm_id}`;
+      }
     }
   } catch (err) {
     console.error("fetch-boundary: Nominatim lookup failed, using fallback bbox:", err.message);
