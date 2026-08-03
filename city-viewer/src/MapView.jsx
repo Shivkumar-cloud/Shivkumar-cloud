@@ -67,7 +67,12 @@ export default function MapView({
     // surface exactly how far rendering actually got instead of guessing.
     const canvas = map.getCanvas();
     const glType = canvas.getContext("webgl2") ? "webgl2" : canvas.getContext("webgl") ? "webgl" : "none";
-    onDebug?.({ glType });
+    const rect = containerRef.current.getBoundingClientRect();
+    onDebug?.({
+      glType,
+      canvasSize: `${canvas.width}x${canvas.height}`,
+      containerSize: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+    });
     const seenEvents = new Set();
     const markOnce = (name) => {
       if (seenEvents.has(name)) return;
