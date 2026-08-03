@@ -390,7 +390,7 @@ async function fetchAllGoogleRoads(apiKey) {
       const path = await fetchRoutePoints(directionsService, PUNE_ORIGIN, { lat: target.lat, lng: target.lng });
       roads[target.id] = decimatePath(path.map((p) => projectLatLng(p.lat, p.lng)));
     } catch (err) {
-      failed.push(target.name);
+      failed.push({ name: target.name, reason: err.message });
     }
   }
   return { roads, succeeded: targets.length - failed.length, total: targets.length, failed };
@@ -410,12 +410,13 @@ async function onFetchRoadsClick() {
     const { roads, succeeded, total, failed } = await fetchAllGoogleRoads(apiKey);
     buildPuneCity(roads);
     if (succeeded === 0) {
+      const reason = failed[0]?.reason || "unknown error";
       roadsStatusEl.textContent =
-        "Google didn't return any routes — check the API key is valid, billing is enabled, and Maps JavaScript API + Directions API are turned on for it.";
+        `Google didn't return any routes (${reason}) — check the API key is valid, billing is enabled, and Maps JavaScript API + Directions API are turned on for it.`;
     } else {
       roadsStatusEl.textContent =
         `Loaded ${succeeded}/${total} real routes from Google.` +
-        (failed.length ? ` Couldn't route to: ${failed.join(", ")}.` : "");
+        (failed.length ? ` Couldn't route to: ${failed.map((f) => `${f.name} (${f.reason})`).join(", ")}.` : "");
     }
   } catch (err) {
     roadsStatusEl.textContent = `Couldn't load Google Maps: ${err.message}`;
