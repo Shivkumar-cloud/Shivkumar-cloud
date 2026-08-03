@@ -16,6 +16,43 @@ import { colorForFeature } from "./colors";
 // every tile request rather than re-opening the archive per tile.
 const pmtilesInstance = new PMTiles(CITY_CONFIG.pmtilesUrl);
 
+// Temporary diagnostic: MapLibre's own lifecycle events ('sourcedata',
+// 'render') fire even for empty/metadata-only frames, so they can't tell us
+// whether the basemap's actual tile requests are succeeding, failing, or
+// hanging. Patch fetch directly to count real network outcomes instead.
+export const netStats = { started: 0, ok: 0, failed: 0, pending: new Set(), lastError: null };
+if (!window.__cartoFetchPatched) {
+  window.__cartoFetchPatched = true;
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input?.url || "";
+    const isCarto = url.includes("cartocdn");
+    if (isCarto) {
+      netStats.started++;
+      netStats.pending.add(url);
+    }
+    try {
+      const res = await origFetch(input, init);
+      if (isCarto) {
+        netStats.pending.delete(url);
+        if (res.ok) netStats.ok++;
+        else {
+          netStats.failed++;
+          netStats.lastError = `HTTP ${res.status} ${url.slice(-40)}`;
+        }
+      }
+      return res;
+    } catch (err) {
+      if (isCarto) {
+        netStats.pending.delete(url);
+        netStats.failed++;
+        netStats.lastError = `${err.message} ${url.slice(-40)}`;
+      }
+      throw err;
+    }
+  };
+}
+
 export default function MapView({
   colorMode,
   ranges,
@@ -79,6 +116,13 @@ export default function MapView({
       seenEvents.add(name);
       onDebug?.({ [name]: true });
     };
+    const netInterval = setInterval(() => {
+      onDebug?.({
+        net: `started:${netStats.started} ok:${netStats.ok} failed:${netStats.failed} pending:${netStats.pending.size}`,
+        netError: netStats.lastError,
+      });
+    }, 1000);
+
     map.on("styledata", () => markOnce("styledata"));
     map.on("sourcedata", () => markOnce("sourcedata"));
     map.on("render", () => markOnce("render"));
@@ -125,6 +169,7 @@ export default function MapView({
 
     return () => {
       clearTimeout(loadTimeout);
+      clearInterval(netInterval);
       map.remove();
       mapRef.current = null;
       overlayRef.current = null;

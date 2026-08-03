@@ -84,6 +84,14 @@ export default function App() {
         <br />
         styledata: {debugInfo.styledata ? "y" : "n"} · sourcedata: {debugInfo.sourcedata ? "y" : "n"} · render:{" "}
         {debugInfo.render ? "y" : "n"} · idle: {debugInfo.idle ? "y" : "n"}
+        <br />
+        carto net: {debugInfo.net ?? "?"}
+        {debugInfo.netError && (
+          <>
+            <br />
+            last error: {debugInfo.netError}
+          </>
+        )}
       </div>
 
       <header className="title-panel">
