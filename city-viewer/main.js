@@ -147,6 +147,13 @@ function init() {
     setTimeout(hideSuggestions, 150);
   });
 
+  bindHold(document.getElementById("nav-up"), () => panBy(0, 1));
+  bindHold(document.getElementById("nav-down"), () => panBy(0, -1));
+  bindHold(document.getElementById("nav-left"), () => panBy(-1, 0));
+  bindHold(document.getElementById("nav-right"), () => panBy(1, 0));
+  bindHold(document.getElementById("nav-zoom-in"), () => zoomBy(0.85));
+  bindHold(document.getElementById("nav-zoom-out"), () => zoomBy(1.18));
+
   onResize();
   requestAnimationFrame(animate);
   loadingEl.classList.add("hidden");
@@ -169,6 +176,57 @@ function resetCamera() {
   }
   controls.target.set(0, 4, 0);
   controls.update();
+}
+
+// On-screen D-pad/zoom controls, for visitors who don't discover drag-to-pan
+// or scroll-to-zoom on their own. Pans relative to the camera's current
+// facing direction (not fixed world axes) so the buttons always feel right
+// regardless of how the view has been orbited.
+function panBy(rightAmount, forwardAmount) {
+  const distance = camera.position.distanceTo(controls.target);
+  const step = Math.max(1, distance * 0.12);
+
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0;
+  if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+  forward.normalize();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+  const delta = new THREE.Vector3()
+    .addScaledVector(right, rightAmount * step)
+    .addScaledVector(forward, forwardAmount * step);
+
+  camera.position.add(delta);
+  controls.target.add(delta);
+  controls.update();
+}
+
+function zoomBy(factor) {
+  const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+  const newDist = THREE.MathUtils.clamp(offset.length() * factor, controls.minDistance, controls.maxDistance);
+  offset.setLength(newDist);
+  camera.position.copy(controls.target).add(offset);
+  controls.update();
+}
+
+function bindHold(button, action) {
+  let interval = null;
+  const start = (e) => {
+    e.preventDefault();
+    action();
+    interval = setInterval(action, 80);
+  };
+  const stop = () => {
+    if (interval) {
+      clearInterval(interval);
+      interval = null;
+    }
+  };
+  button.addEventListener("pointerdown", start);
+  button.addEventListener("pointerup", stop);
+  button.addEventListener("pointerleave", stop);
+  button.addEventListener("pointercancel", stop);
 }
 
 function updateModeUI() {

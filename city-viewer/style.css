@@ -302,6 +302,57 @@ html, body {
   pointer-events: none;
 }
 
+#navControls {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 36px);
+  grid-template-rows: repeat(2, 36px);
+  gap: 4px;
+}
+
+.zoom-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.dpad button,
+.zoom-controls button {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  color: var(--text);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.dpad button:hover,
+.zoom-controls button:hover {
+  background: rgba(95, 180, 255, 0.25);
+  border-color: var(--accent);
+}
+
+.dpad button:active,
+.zoom-controls button:active {
+  transform: scale(0.92);
+}
+
 @media (max-width: 640px) {
   #panel {
     max-width: calc(100vw - 40px);
