@@ -205,6 +205,14 @@ html, body {
   font-size: 0.8rem;
 }
 
+.hint-text {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .status-text {
   margin: 2px 0 0;
   font-size: 0.75rem;

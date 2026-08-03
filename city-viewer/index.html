@@ -41,10 +41,11 @@
           <div id="searchSuggestions" class="suggestions hidden"></div>
         </div>
 
-        <label for="exploreRadius">Load radius: <span id="exploreRadiusValue">450</span> m</label>
-        <input type="range" id="exploreRadius" min="200" max="900" step="50" value="450" />
+        <label for="exploreRadius">View distance: <span id="exploreRadiusValue">400</span> m</label>
+        <input type="range" id="exploreRadius" min="250" max="800" step="50" value="400" />
+        <p class="hint-text">Tiles stream in automatically as you pan, orbit, or zoom — like Google Maps, but real OpenStreetMap data. No manual loading needed.</p>
 
-        <button id="load-area">🌐 Load Real Area Here (OpenStreetMap)</button>
+        <button id="load-area">🔄 Refresh Nearby Tiles</button>
         <p id="explore-status" class="status-text"></p>
         <p class="attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</p>
       </div>

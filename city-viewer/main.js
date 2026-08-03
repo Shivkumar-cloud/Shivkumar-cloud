@@ -2,8 +2,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   EXPLORE_METERS_PER_UNIT,
+  TILE_SIZE_METERS,
   projectExplore,
-  fetchArea,
+  tileIndexFor,
+  tileKey,
+  tileCenterMeters,
+  fetchTile,
   geocodePlace,
   geocodeSuggestions,
   ROAD_STYLES,
@@ -20,9 +24,9 @@ const exploreGroup = document.getElementById("exploreGroup");
 const placeSearchInput = document.getElementById("placeSearch");
 const searchGoBtn = document.getElementById("search-go");
 const suggestionsEl = document.getElementById("searchSuggestions");
-const exploreRadiusInput = document.getElementById("exploreRadius");
-const exploreRadiusValue = document.getElementById("exploreRadiusValue");
-const loadAreaBtn = document.getElementById("load-area");
+const viewDistanceInput = document.getElementById("exploreRadius");
+const viewDistanceValue = document.getElementById("exploreRadiusValue");
+const refreshTilesBtn = document.getElementById("load-area");
 const exploreStatusEl = document.getElementById("explore-status");
 const regenerateBtn = document.getElementById("regenerate");
 let suggestDebounceTimer = null;
@@ -51,8 +55,16 @@ let sunLight, hemiLight, skyMesh, groundMesh;
 let mode = "procedural";
 let puneRadiusUnits = 40;
 
-let exploreCenter = { ...DEFAULT_EXPLORE_CENTER };
-let exploreData = null;
+// Fixed forever for the whole session — every tile is projected relative to
+// this single origin, so tiles line up correctly with each other regardless
+// of how far the camera has panned from the starting point.
+const TILE_ORIGIN = DEFAULT_EXPLORE_CENTER;
+let loadedTiles = new Map(); // key -> { ix, iz, group, buildingMeshes, landmarkMeshes, loading, counts... }
+let tileFetchQueue = [];
+let activeTileFetches = 0;
+const MAX_CONCURRENT_TILE_FETCHES = 2;
+let viewRadiusMeters = 400;
+let tileCheckTimer = null;
 
 init();
 
@@ -104,12 +116,8 @@ function init() {
     if (mode === "pune") return;
     mode = "pune";
     updateModeUI();
-    if (exploreData) {
-      buildExploreCity();
-      resetCamera();
-    } else {
-      loadArea(exploreCenter, parseInt(exploreRadiusInput.value, 10));
-    }
+    resetCamera();
+    updateTilesAroundCamera();
   });
   citySizeInput.addEventListener("input", () => {
     citySizeValue.textContent = citySizeInput.value;
@@ -120,11 +128,17 @@ function init() {
     buildCity(size);
     resetCamera();
   });
-  exploreRadiusInput.addEventListener("input", () => {
-    exploreRadiusValue.textContent = exploreRadiusInput.value;
+  viewDistanceInput.addEventListener("input", () => {
+    viewDistanceValue.textContent = viewDistanceInput.value;
   });
-  loadAreaBtn.addEventListener("click", () => {
-    loadArea(exploreCenter, parseInt(exploreRadiusInput.value, 10));
+  viewDistanceInput.addEventListener("change", () => {
+    viewRadiusMeters = parseInt(viewDistanceInput.value, 10);
+    puneRadiusUnits = Math.max(15, (viewRadiusMeters / EXPLORE_METERS_PER_UNIT) * 1.3);
+    applyFog();
+    if (mode === "pune") updateTilesAroundCamera();
+  });
+  refreshTilesBtn.addEventListener("click", () => {
+    if (mode === "pune") updateTilesAroundCamera(true);
   });
   searchGoBtn.addEventListener("click", onSearchGo);
   placeSearchInput.addEventListener("keydown", (e) => {
@@ -153,6 +167,15 @@ function init() {
   bindHold(document.getElementById("nav-right"), () => panBy(1, 0));
   bindHold(document.getElementById("nav-zoom-in"), () => zoomBy(0.85));
   bindHold(document.getElementById("nav-zoom-out"), () => zoomBy(1.18));
+
+  // Stream tiles in as the camera moves — like Google Maps, but for real
+  // OpenStreetMap data. Debounced so a drag/orbit/zoom gesture only triggers
+  // one check after motion actually settles, not on every intermediate frame.
+  controls.addEventListener("change", () => {
+    if (mode !== "pune") return;
+    clearTimeout(tileCheckTimer);
+    tileCheckTimer = setTimeout(() => updateTilesAroundCamera(), 500);
+  });
 
   onResize();
   requestAnimationFrame(animate);
@@ -305,6 +328,13 @@ function clearCity() {
   landmarkMeshes = [];
   selectEntity(null);
   cityGroup = new THREE.Group();
+
+  // Tile meshes lived inside the cityGroup we just disposed, so the tracked
+  // tiles are now stale references — drop them too. Re-entering Pune mode
+  // re-streams whatever's near the camera from scratch.
+  loadedTiles.clear();
+  tileFetchQueue = [];
+  activeTileFetches = 0;
 }
 
 function buildCity(gridSize) {
@@ -390,8 +420,9 @@ function addRooftopDetail(building, width, depth, height) {
 }
 
 // ---------------------------------------------------------------------------
-// Real Pune explorer — everything below renders live OpenStreetMap data for
-// whatever area the user has searched for or loaded. No random/dummy geometry.
+// Real Pune explorer — streams live OpenStreetMap data in fixed-size tiles as
+// the camera moves, the same idea Google Maps uses for its own tiles. No
+// random/dummy geometry anywhere in this section; only real map data renders.
 // ---------------------------------------------------------------------------
 
 async function onSearchGo() {
@@ -404,8 +435,8 @@ async function onSearchGo() {
   exploreStatusEl.textContent = `Searching for "${query}"…`;
   try {
     const place = await geocodePlace(query);
-    exploreStatusEl.textContent = `Found: ${place.displayName}. Loading…`;
-    await loadArea({ lat: place.lat, lng: place.lng }, parseInt(exploreRadiusInput.value, 10));
+    exploreStatusEl.textContent = `Found: ${place.displayName}. Loading nearby tiles…`;
+    jumpTo(place.lat, place.lng);
   } catch (err) {
     exploreStatusEl.textContent = `Search failed: ${err.message}`;
   } finally {
@@ -439,7 +470,8 @@ function renderSuggestions(results) {
       e.preventDefault(); // keep the input focused so blur-hide doesn't race this click
       placeSearchInput.value = r.displayName;
       hideSuggestions();
-      loadArea({ lat: r.lat, lng: r.lng }, parseInt(exploreRadiusInput.value, 10));
+      exploreStatusEl.textContent = `Jumped to ${r.displayName}. Loading nearby tiles…`;
+      jumpTo(r.lat, r.lng);
     });
     suggestionsEl.appendChild(item);
   }
@@ -451,53 +483,160 @@ function hideSuggestions() {
   suggestionsEl.innerHTML = "";
 }
 
-async function loadArea(center, radiusMeters) {
-  loadAreaBtn.disabled = true;
-  exploreStatusEl.textContent = `Loading real map data within ${radiusMeters}m…`;
-  try {
-    const data = await fetchArea(center, radiusMeters);
-    exploreData = data;
-    exploreCenter = center;
-    puneRadiusUnits = Math.max(15, (radiusMeters / EXPLORE_METERS_PER_UNIT) * 1.2);
-    applyFog();
-    buildExploreCity();
-    resetCamera();
-    exploreStatusEl.textContent =
-      `Loaded ${data.buildings.length} buildings, ${data.roads.length} roads/paths, ` +
-      `${data.railways.length} rail lines, ${data.busStops.length} bus stops, ` +
-      `${data.trainStations.length} stations, ${data.parks.length + data.water.length} green/water areas.`;
-  } catch (err) {
-    exploreStatusEl.textContent = `Couldn't load OpenStreetMap data: ${err.message}`;
-  } finally {
-    loadAreaBtn.disabled = false;
+function jumpTo(lat, lng) {
+  const { x, z } = projectExplore(lat, lng, TILE_ORIGIN);
+  controls.target.set(x, 4, z);
+  camera.position.set(x + puneRadiusUnits, puneRadiusUnits * 0.8, z + puneRadiusUnits);
+  controls.update();
+  updateTilesAroundCamera();
+}
+
+// --- Tile streaming ---------------------------------------------------------
+
+function sceneToMeters(vector3) {
+  return { xMeters: vector3.x * EXPLORE_METERS_PER_UNIT, zMeters: vector3.z * EXPLORE_METERS_PER_UNIT };
+}
+
+function updateTilesAroundCamera(force = false) {
+  if (mode !== "pune") return;
+
+  const { xMeters, zMeters } = sceneToMeters(controls.target);
+  const { ix: cix, iz: ciz } = tileIndexFor(xMeters, zMeters);
+  const tileSpan = Math.ceil(viewRadiusMeters / TILE_SIZE_METERS) + 1;
+
+  for (let dx = -tileSpan; dx <= tileSpan; dx++) {
+    for (let dz = -tileSpan; dz <= tileSpan; dz++) {
+      const ix = cix + dx;
+      const iz = ciz + dz;
+      const { xMeters: tcx, zMeters: tcz } = tileCenterMeters(ix, iz);
+      const dist = Math.hypot(tcx - xMeters, tcz - zMeters);
+      if (dist > viewRadiusMeters + TILE_SIZE_METERS) continue;
+
+      const key = tileKey(ix, iz);
+      if (loadedTiles.has(key)) {
+        if (force && !loadedTiles.get(key).loading) {
+          unloadTile(key);
+          enqueueTileFetch(ix, iz);
+        }
+        continue;
+      }
+      enqueueTileFetch(ix, iz);
+    }
+  }
+
+  // Unload tiles that have drifted well outside the view distance (extra
+  // margin avoids flicker right at the boundary as the camera moves).
+  const unloadDist = viewRadiusMeters * 2 + TILE_SIZE_METERS * 2;
+  for (const [key, tile] of loadedTiles) {
+    const { xMeters: tcx, zMeters: tcz } = tileCenterMeters(tile.ix, tile.iz);
+    if (Math.hypot(tcx - xMeters, tcz - zMeters) > unloadDist) unloadTile(key);
+  }
+
+  updateExploreStatus();
+}
+
+function enqueueTileFetch(ix, iz) {
+  const key = tileKey(ix, iz);
+  if (loadedTiles.has(key) || tileFetchQueue.some((t) => t.key === key)) return;
+  loadedTiles.set(key, { ix, iz, group: null, buildingMeshes: [], landmarkMeshes: [], loading: true, counts: null });
+  tileFetchQueue.push({ key, ix, iz });
+  processTileQueue();
+}
+
+function processTileQueue() {
+  while (activeTileFetches < MAX_CONCURRENT_TILE_FETCHES && tileFetchQueue.length) {
+    const job = tileFetchQueue.shift();
+    if (!loadedTiles.has(job.key) || !loadedTiles.get(job.key).loading) continue;
+    activeTileFetches++;
+    loadTile(job.ix, job.iz).finally(() => {
+      activeTileFetches--;
+      processTileQueue();
+    });
   }
 }
 
-function buildExploreCity() {
-  clearCity();
-  if (!exploreData) {
-    scene.add(cityGroup);
-    return;
+async function loadTile(ix, iz) {
+  const key = tileKey(ix, iz);
+  try {
+    const data = await fetchTile(ix, iz, TILE_ORIGIN);
+    if (!loadedTiles.has(key) || mode !== "pune") return; // unloaded or left Pune mode mid-fetch
+    renderTile(key, ix, iz, data);
+  } catch (err) {
+    loadedTiles.delete(key); // drop it so a future pass near here can retry
+    console.warn(`Tile ${key} failed to load:`, err.message);
+  }
+  updateExploreStatus();
+}
+
+function renderTile(key, ix, iz, data) {
+  const group = new THREE.Group();
+  const ctx = { group, tileBuildings: [], tileLandmarks: [] };
+  const origin = TILE_ORIGIN;
+
+  for (const area of data.parks) addAreaPatch(ctx, area, origin, 0x3f6b3a, "Park");
+  for (const area of data.water) addAreaPatch(ctx, area, origin, 0x2f6f9e, "Water");
+  for (const road of data.roads) addLineFeature(ctx, road.points, origin, ROAD_STYLES[road.kind] || ROAD_STYLES.DEFAULT, 0.01);
+  for (const rail of data.railways) addLineFeature(ctx, rail.points, origin, { width: 0.9, color: 0x4a4038 }, 0.015);
+  for (const b of data.buildings) addExploreBuilding(ctx, b, origin);
+  for (const stop of data.busStops) {
+    addPointMarker(ctx, stop, origin, { color: 0xffb400, height: 0.6, title: stop.name || "Bus Stop", description: "Bus stop (OpenStreetMap)." });
+  }
+  for (const st of data.trainStations) {
+    addPointMarker(ctx, st, origin, { color: 0x2f6fbf, height: 1.0, title: st.name || "Train Station", description: "Railway station (OpenStreetMap)." });
   }
 
-  const origin = exploreCenter;
+  cityGroup.add(group);
+  buildings.push(...ctx.tileBuildings);
+  landmarkMeshes.push(...ctx.tileLandmarks);
 
-  for (const area of exploreData.parks) addAreaPatch(area, origin, 0x3f6b3a, "Park");
-  for (const area of exploreData.water) addAreaPatch(area, origin, 0x2f6f9e, "Water");
+  loadedTiles.set(key, {
+    ix,
+    iz,
+    group,
+    buildingMeshes: ctx.tileBuildings,
+    landmarkMeshes: ctx.tileLandmarks,
+    loading: false,
+    counts: {
+      buildings: data.buildings.length,
+      roads: data.roads.length,
+      rail: data.railways.length,
+      busStops: data.busStops.length,
+      stations: data.trainStations.length,
+      areas: data.parks.length + data.water.length,
+    },
+  });
+}
 
-  for (const road of exploreData.roads) addLineFeature(road.points, origin, ROAD_STYLES[road.kind] || ROAD_STYLES.DEFAULT, 0.01);
-  for (const rail of exploreData.railways) addLineFeature(rail.points, origin, { width: 0.9, color: 0x4a4038 }, 0.015);
+function unloadTile(key) {
+  const tile = loadedTiles.get(key);
+  if (!tile) return;
+  loadedTiles.delete(key);
+  if (tile.loading) return; // nothing rendered yet
 
-  for (const b of exploreData.buildings) addExploreBuilding(b, origin);
-
-  for (const stop of exploreData.busStops) {
-    addPointMarker(stop, origin, { color: 0xffb400, height: 0.6, title: stop.name || "Bus Stop", description: "Bus stop (OpenStreetMap)." });
+  cityGroup.remove(tile.group);
+  disposeGroup(tile.group);
+  buildings = buildings.filter((m) => !tile.buildingMeshes.includes(m));
+  landmarkMeshes = landmarkMeshes.filter((m) => !tile.landmarkMeshes.includes(m));
+  if (selected && (tile.buildingMeshes.includes(selected) || tile.landmarkMeshes.includes(selected))) {
+    selectEntity(null);
   }
-  for (const st of exploreData.trainStations) {
-    addPointMarker(st, origin, { color: 0x2f6fbf, height: 1.0, title: st.name || "Train Station", description: "Railway station (OpenStreetMap)." });
-  }
+}
 
-  scene.add(cityGroup);
+function updateExploreStatus() {
+  let loaded = 0, loading = 0;
+  const totals = { buildings: 0, roads: 0, rail: 0, busStops: 0, stations: 0, areas: 0 };
+  for (const tile of loadedTiles.values()) {
+    if (tile.loading) {
+      loading++;
+      continue;
+    }
+    loaded++;
+    for (const k of Object.keys(totals)) totals[k] += tile.counts[k];
+  }
+  exploreStatusEl.textContent =
+    `Tiles loaded: ${loaded}${loading ? ` (+${loading} loading…)` : ""} — ` +
+    `${totals.buildings} buildings, ${totals.roads} roads/paths, ${totals.rail} rail, ` +
+    `${totals.busStops} bus stops, ${totals.stations} stations, ${totals.areas} green/water areas.`;
 }
 
 function buildingColor(type) {
@@ -525,7 +664,7 @@ function buildingColor(type) {
   }
 }
 
-function addExploreBuilding(b, origin) {
+function addExploreBuilding(ctx, b, origin) {
   const shape = new THREE.Shape();
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   b.ring.forEach((pt, i) => {
@@ -569,11 +708,11 @@ function addExploreBuilding(b, origin) {
     description: "Real building footprint from OpenStreetMap.",
   };
 
-  cityGroup.add(mesh);
-  buildings.push(mesh);
+  ctx.group.add(mesh);
+  ctx.tileBuildings.push(mesh);
 }
 
-function addAreaPatch(area, origin, color, label) {
+function addAreaPatch(ctx, area, origin, color, label) {
   const shape = new THREE.Shape();
   area.ring.forEach((pt, i) => {
     const { x, z } = projectExplore(pt.lat, pt.lng, origin);
@@ -599,19 +738,19 @@ function addAreaPatch(area, origin, color, label) {
     title: area.name || label,
     description: `${label} area, from OpenStreetMap.`,
   };
-  cityGroup.add(mesh);
-  landmarkMeshes.push(mesh);
+  ctx.group.add(mesh);
+  ctx.tileLandmarks.push(mesh);
 }
 
-function addLineFeature(points, origin, style, y) {
+function addLineFeature(ctx, points, origin, style, y) {
   const projected = decimatePoints(points, 60).map((pt) => projectExplore(pt.lat, pt.lng, origin));
   const mat = new THREE.MeshStandardMaterial({ color: style.color, roughness: 0.9 });
   for (let i = 0; i < projected.length - 1; i++) {
-    addSegment(mat, projected[i], projected[i + 1], style.width, y);
+    addSegment(ctx, mat, projected[i], projected[i + 1], style.width, y);
   }
 }
 
-function addSegment(mat, p1, p2, width, y) {
+function addSegment(ctx, mat, p1, p2, width, y) {
   const dx = p2.x - p1.x;
   const dz = p2.z - p1.z;
   const length = Math.hypot(dx, dz);
@@ -623,10 +762,10 @@ function addSegment(mat, p1, p2, width, y) {
   mesh.rotation.z = -Math.atan2(dz, dx);
   mesh.position.set((p1.x + p2.x) / 2, y, (p1.z + p2.z) / 2);
   mesh.receiveShadow = true;
-  cityGroup.add(mesh);
+  ctx.group.add(mesh);
 }
 
-function addPointMarker(node, origin, { color, height, title, description }) {
+function addPointMarker(ctx, node, origin, { color, height, title, description }) {
   const { x, z } = projectExplore(node.lat, node.lng, origin);
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
 
@@ -642,8 +781,8 @@ function addPointMarker(node, origin, { color, height, title, description }) {
   pole.userData = userData;
   sign.userData = userData;
 
-  cityGroup.add(pole, sign);
-  landmarkMeshes.push(pole, sign);
+  ctx.group.add(pole, sign);
+  ctx.tileLandmarks.push(pole, sign);
 }
 
 function disposeGroup(group) {
