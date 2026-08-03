@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interactive 3D City Building Viewer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+
+    <header id="hud">
+      <h1>3D City Viewer</h1>
+      <p class="subtitle">Drag to orbit &middot; scroll to zoom &middot; click a building to inspect it</p>
+    </header>
+
+    <section id="panel">
+      <div class="panel-group">
+        <button id="regenerate">🏙️ Regenerate City</button>
+        <button id="toggle-day">🌗 Toggle Day / Night</button>
+        <button id="toggle-wireframe">🔲 Toggle Wireframe</button>
+        <button id="reset-camera">🎯 Reset Camera</button>
+      </div>
+
+      <div class="panel-group slider-group">
+        <label for="citySize">City size: <span id="citySizeValue">12</span></label>
+        <input type="range" id="citySize" min="4" max="24" step="1" value="12" />
+      </div>
+    </section>
+
+    <aside id="info" class="hidden">
+      <button id="info-close" aria-label="Close">&times;</button>
+      <h2 id="info-title">Building</h2>
+      <dl>
+        <dt>Height</dt><dd id="info-height">-</dd>
+        <dt>Floors</dt><dd id="info-floors">-</dd>
+        <dt>Footprint</dt><dd id="info-footprint">-</dd>
+        <dt>District</dt><dd id="info-district">-</dd>
+      </dl>
+    </aside>
+
+    <div id="loading">Loading city…</div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
