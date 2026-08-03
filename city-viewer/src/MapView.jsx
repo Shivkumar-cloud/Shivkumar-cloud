@@ -124,9 +124,29 @@ export default function MapView({
     }, 1000);
 
     map.on("styledata", () => markOnce("styledata"));
-    map.on("sourcedata", () => markOnce("sourcedata"));
     map.on("render", () => markOnce("render"));
     map.on("idle", () => markOnce("idle"));
+
+    // sourcedata/dataloading fire for style metadata too, which made the
+    // earlier 'y' reading meaningless — sourceDataType distinguishes an
+    // actual tile arriving ('content') from just the source's metadata.
+    // Real tile fetches happen inside a worker thread, so this (rather than
+    // patching fetch) is the only way to see them from the main thread.
+    const tileCounts = { loading: 0, content: 0, metadata: 0, other: 0 };
+    map.on("dataloading", (e) => {
+      if (e.dataType === "source") tileCounts.loading++;
+    });
+    map.on("sourcedata", (e) => {
+      if (e.dataType !== "source") return;
+      if (e.sourceDataType === "content") tileCounts.content++;
+      else if (e.sourceDataType === "metadata") tileCounts.metadata++;
+      else tileCounts.other++;
+    });
+    const tileInterval = setInterval(() => {
+      onDebug?.({
+        tiles: `loading:${tileCounts.loading} content:${tileCounts.content} metadata:${tileCounts.metadata} other:${tileCounts.other}`,
+      });
+    }, 1000);
 
     // MapLibre swallows style/tile network failures into a console error by
     // default, which leaves the map looking like a plain black screen with
@@ -170,6 +190,7 @@ export default function MapView({
     return () => {
       clearTimeout(loadTimeout);
       clearInterval(netInterval);
+      clearInterval(tileInterval);
       map.remove();
       mapRef.current = null;
       overlayRef.current = null;

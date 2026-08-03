@@ -82,8 +82,10 @@ export default function App() {
       <div className="debug-hud">
         gl: {debugInfo.glType ?? "?"} · canvas: {debugInfo.canvasSize ?? "?"} · container: {debugInfo.containerSize ?? "?"}
         <br />
-        styledata: {debugInfo.styledata ? "y" : "n"} · sourcedata: {debugInfo.sourcedata ? "y" : "n"} · render:{" "}
-        {debugInfo.render ? "y" : "n"} · idle: {debugInfo.idle ? "y" : "n"}
+        styledata: {debugInfo.styledata ? "y" : "n"} · render: {debugInfo.render ? "y" : "n"} · idle:{" "}
+        {debugInfo.idle ? "y" : "n"}
+        <br />
+        tiles: {debugInfo.tiles ?? "?"}
         <br />
         carto net: {debugInfo.net ?? "?"}
         {debugInfo.netError && (
