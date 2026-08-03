@@ -1,0 +1,127 @@
+name: Build data pipeline and deploy Pune Typology Explorer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  MAHARASHTRA_PBF_URL: https://download.geofabrik.de/asia/india/maharashtra-latest.osm.pbf
+
+jobs:
+  build-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install osmium-tool and tippecanoe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool tippecanoe
+
+      - name: Install go-pmtiles
+        run: |
+          go install github.com/protomaps/go-pmtiles@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch Pune's real administrative boundary
+        working-directory: city-viewer/pipeline
+        run: node fetch-boundary.cjs pune-boundary.geojson pune.poly
+
+      - name: Download Maharashtra OSM extract (Geofabrik)
+        working-directory: city-viewer/pipeline
+        run: |
+          curl -fL --retry 4 --retry-delay 5 -o maharashtra-latest.osm.pbf "$MAHARASHTRA_PBF_URL"
+          ls -la maharashtra-latest.osm.pbf
+
+      - name: Extract Pune from the state extract
+        working-directory: city-viewer/pipeline
+        run: osmium extract -p pune.poly --strategy=smart -o pune.osm.pbf --overwrite maharashtra-latest.osm.pbf
+
+      - name: Filter to tagged buildings only
+        working-directory: city-viewer/pipeline
+        run: osmium tags-filter -o pune-buildings.osm.pbf --overwrite pune.osm.pbf w/building
+
+      - name: Export building polygons to GeoJSONSeq
+        working-directory: city-viewer/pipeline
+        run: |
+          osmium export pune-buildings.osm.pbf \
+            -f geojsonseq -o pune-buildings.geojsonseq --overwrite \
+            -a type,id --geometry-types=polygon
+
+      - name: Classify buildings by typology
+        working-directory: city-viewer/pipeline
+        run: node classify.cjs pune-buildings.geojsonseq > classified.ndjson
+
+      - name: Build vector tiles (tippecanoe)
+        working-directory: city-viewer/pipeline
+        run: |
+          tippecanoe -o buildings.mbtiles \
+            --name="Pune Buildings" \
+            --attribution="© OpenStreetMap contributors" \
+            --layer=buildings \
+            --minimum-zoom=10 --maximum-zoom=16 \
+            --drop-densest-as-needed \
+            --force \
+            classified.ndjson
+
+      - name: Convert to PMTiles
+        working-directory: city-viewer/pipeline
+        run: go-pmtiles convert buildings.mbtiles buildings.pmtiles
+
+      - name: Upload PMTiles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildings-pmtiles
+          path: city-viewer/pipeline/buildings.pmtiles
+          retention-days: 7
+
+  build-site:
+    needs: build-data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Download PMTiles artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: buildings-pmtiles
+          path: city-viewer/public
+
+      - working-directory: city-viewer
+        run: npm ci
+      - working-directory: city-viewer
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: city-viewer/dist
+
+  deploy:
+    needs: build-site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
