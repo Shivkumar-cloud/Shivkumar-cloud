@@ -24,6 +24,7 @@ export default function App() {
   const [selectedBuilding, setSelectedBuilding] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [mapError, setMapError] = useState(null);
+  const [debugInfo, setDebugInfo] = useState({});
 
   useEffect(() => {
     const p = new PMTiles(CITY_CONFIG.pmtilesUrl);
@@ -68,6 +69,7 @@ export default function App() {
         onViewCounts={setViewCounts}
         onSelectBuilding={setSelectedBuilding}
         onError={setMapError}
+        onDebug={(patch) => setDebugInfo((d) => ({ ...d, ...patch }))}
       />
 
       {mapError && (
@@ -75,6 +77,12 @@ export default function App() {
           {mapError}
         </div>
       )}
+
+      {/* Temporary diagnostic HUD while tracking down a black-map report — remove once resolved. */}
+      <div className="debug-hud">
+        gl: {debugInfo.glType ?? "?"} · styledata: {debugInfo.styledata ? "y" : "n"} · sourcedata:{" "}
+        {debugInfo.sourcedata ? "y" : "n"} · render: {debugInfo.render ? "y" : "n"} · idle: {debugInfo.idle ? "y" : "n"}
+      </div>
 
       <header className="title-panel">
         <h1>{CITY_CONFIG.name}</h1>

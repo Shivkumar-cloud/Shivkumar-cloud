@@ -27,6 +27,7 @@ export default function MapView({
   onSelectBuilding,
   onMapReady,
   onError,
+  onDebug,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -60,6 +61,23 @@ export default function MapView({
     }
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 140, unit: "metric" }), "bottom-left");
+
+    // Temporary diagnostic HUD: the map can reach 'load' successfully (no
+    // error, no timeout) yet still paint nothing visible on some devices, so
+    // surface exactly how far rendering actually got instead of guessing.
+    const canvas = map.getCanvas();
+    const glType = canvas.getContext("webgl2") ? "webgl2" : canvas.getContext("webgl") ? "webgl" : "none";
+    onDebug?.({ glType });
+    const seenEvents = new Set();
+    const markOnce = (name) => {
+      if (seenEvents.has(name)) return;
+      seenEvents.add(name);
+      onDebug?.({ [name]: true });
+    };
+    map.on("styledata", () => markOnce("styledata"));
+    map.on("sourcedata", () => markOnce("sourcedata"));
+    map.on("render", () => markOnce("render"));
+    map.on("idle", () => markOnce("idle"));
 
     // MapLibre swallows style/tile network failures into a console error by
     // default, which leaves the map looking like a plain black screen with
