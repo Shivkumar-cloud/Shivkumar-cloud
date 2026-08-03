@@ -5,6 +5,7 @@ import {
   projectExplore,
   fetchArea,
   geocodePlace,
+  geocodeSuggestions,
   ROAD_STYLES,
   decimatePoints,
 } from "./osm-explore.js";
@@ -18,11 +19,14 @@ const citySizeGroup = document.getElementById("citySizeGroup");
 const exploreGroup = document.getElementById("exploreGroup");
 const placeSearchInput = document.getElementById("placeSearch");
 const searchGoBtn = document.getElementById("search-go");
+const suggestionsEl = document.getElementById("searchSuggestions");
 const exploreRadiusInput = document.getElementById("exploreRadius");
 const exploreRadiusValue = document.getElementById("exploreRadiusValue");
 const loadAreaBtn = document.getElementById("load-area");
 const exploreStatusEl = document.getElementById("explore-status");
 const regenerateBtn = document.getElementById("regenerate");
+let suggestDebounceTimer = null;
+let suggestToken = 0;
 
 const DISTRICTS = [
   { name: "Downtown", colors: [0x3a4a63, 0x455b7a, 0x54688a, 0x2e3a4f], minFloors: 12, maxFloors: 34 },
@@ -124,7 +128,23 @@ function init() {
   });
   searchGoBtn.addEventListener("click", onSearchGo);
   placeSearchInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") onSearchGo();
+    if (e.key === "Enter") {
+      hideSuggestions();
+      onSearchGo();
+    }
+  });
+  placeSearchInput.addEventListener("input", () => {
+    clearTimeout(suggestDebounceTimer);
+    const q = placeSearchInput.value.trim();
+    if (q.length < 3) {
+      hideSuggestions();
+      return;
+    }
+    suggestDebounceTimer = setTimeout(() => loadSuggestions(q), 350);
+  });
+  placeSearchInput.addEventListener("blur", () => {
+    // delay so a suggestion click's mousedown fires before we hide the list
+    setTimeout(hideSuggestions, 150);
   });
 
   onResize();
@@ -158,9 +178,24 @@ function updateModeUI() {
   exploreGroup.classList.toggle("hidden", mode !== "pune");
   regenerateBtn.classList.toggle("hidden", mode !== "procedural");
   controls.minDistance = mode === "pune" ? 2 : 8;
-  scene.fog.near = mode === "pune" ? 15 : 60;
-  scene.fog.far = mode === "pune" ? 140 : 160;
+  applyFog();
   if (groundMesh) groundMesh.material.color.set(mode === "pune" ? 0x2f2c26 : 0x3c4a3f);
+}
+
+// Fog distance must track the size of whatever's actually loaded — a fixed
+// far distance washes the whole scene into haze once a loaded area (or its
+// camera distance) exceeds it, which is exactly what happens at large
+// "Load radius" settings in Pune mode.
+function applyFog() {
+  if (mode === "pune") {
+    controls.maxDistance = Math.max(120, puneRadiusUnits * 3);
+    scene.fog.near = Math.max(8, puneRadiusUnits * 0.3);
+    scene.fog.far = Math.max(80, puneRadiusUnits * 2.6);
+  } else {
+    controls.maxDistance = 200;
+    scene.fog.near = 60;
+    scene.fog.far = 160;
+  }
 }
 
 function buildSky() {
@@ -320,6 +355,44 @@ async function onSearchGo() {
   }
 }
 
+async function loadSuggestions(query) {
+  const token = ++suggestToken;
+  try {
+    const results = await geocodeSuggestions(query, 5);
+    if (token !== suggestToken) return; // a newer keystroke already superseded this request
+    renderSuggestions(results);
+  } catch {
+    if (token === suggestToken) hideSuggestions();
+  }
+}
+
+function renderSuggestions(results) {
+  if (!results.length) {
+    hideSuggestions();
+    return;
+  }
+  suggestionsEl.innerHTML = "";
+  for (const r of results) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "suggestion-item";
+    item.textContent = r.displayName;
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // keep the input focused so blur-hide doesn't race this click
+      placeSearchInput.value = r.displayName;
+      hideSuggestions();
+      loadArea({ lat: r.lat, lng: r.lng }, parseInt(exploreRadiusInput.value, 10));
+    });
+    suggestionsEl.appendChild(item);
+  }
+  suggestionsEl.classList.remove("hidden");
+}
+
+function hideSuggestions() {
+  suggestionsEl.classList.add("hidden");
+  suggestionsEl.innerHTML = "";
+}
+
 async function loadArea(center, radiusMeters) {
   loadAreaBtn.disabled = true;
   exploreStatusEl.textContent = `Loading real map data within ${radiusMeters}m…`;
@@ -328,6 +401,7 @@ async function loadArea(center, radiusMeters) {
     exploreData = data;
     exploreCenter = center;
     puneRadiusUnits = Math.max(15, (radiusMeters / EXPLORE_METERS_PER_UNIT) * 1.2);
+    applyFog();
     buildExploreCity();
     resetCamera();
     exploreStatusEl.textContent =

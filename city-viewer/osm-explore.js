@@ -24,14 +24,19 @@ export function projectExplore(lat, lng, origin) {
   return { x: xMeters / EXPLORE_METERS_PER_UNIT, z: zMeters / EXPLORE_METERS_PER_UNIT };
 }
 
-export async function geocodePlace(query) {
+export async function geocodeSuggestions(query, limit = 5) {
   const q = /pune/i.test(query) ? query : `${query}, Pune, Maharashtra, India`;
-  const url = `${NOMINATIM_ENDPOINT}?format=json&limit=1&q=${encodeURIComponent(q)}`;
+  const url = `${NOMINATIM_ENDPOINT}?format=json&limit=${limit}&q=${encodeURIComponent(q)}`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`Nominatim returned HTTP ${res.status}`);
   const results = await res.json();
+  return results.map((r) => ({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name }));
+}
+
+export async function geocodePlace(query) {
+  const results = await geocodeSuggestions(query, 1);
   if (!results.length) throw new Error(`No place found for "${query}"`);
-  return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), displayName: results[0].display_name };
+  return results[0];
 }
 
 export async function fetchArea(center, radiusMeters) {

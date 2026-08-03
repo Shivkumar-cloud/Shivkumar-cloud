@@ -12,7 +12,7 @@
 
     <header id="hud">
       <h1>3D City Viewer</h1>
-      <p class="subtitle">Drag to orbit &middot; scroll to zoom &middot; click a building to inspect it</p>
+      <p class="subtitle">Drag to orbit &middot; right-drag (or two-finger drag) to pan &middot; scroll to zoom &middot; click to inspect</p>
     </header>
 
     <section id="panel">
@@ -38,6 +38,7 @@
         <div class="search-row">
           <input type="text" id="placeSearch" placeholder="e.g. Kothrud, Hinjewadi, MG Road" autocomplete="off" />
           <button id="search-go">Go</button>
+          <div id="searchSuggestions" class="suggestions hidden"></div>
         </div>
 
         <label for="exploreRadius">Load radius: <span id="exploreRadiusValue">450</span> m</label>

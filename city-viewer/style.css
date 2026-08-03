@@ -119,12 +119,53 @@ html, body {
 }
 
 .search-row {
+  position: relative;
   display: flex;
   gap: 6px;
 }
 
 .search-row input[type="text"] {
   flex: 1;
+}
+
+.suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: rgba(10, 13, 20, 0.97);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 20;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.suggestions.hidden {
+  display: none;
+}
+
+.suggestion-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--panel-border);
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:hover {
+  background: rgba(95, 180, 255, 0.18);
 }
 
 .attribution {
