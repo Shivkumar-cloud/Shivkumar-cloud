@@ -127,9 +127,19 @@ jobs:
       - working-directory: city-viewer
         run: npm run build
 
+      # upload-pages-artifact publishes the given path's *contents* as the
+      # site root. vite.config.js builds asset URLs assuming the app is
+      # served from /Shivkumar-cloud/city-viewer/ (to keep the same URL the
+      # old viewer used), so the built output must be nested under a
+      # city-viewer/ folder in the artifact, not uploaded as the site root.
+      - name: Stage built site under /city-viewer/
+        run: |
+          mkdir -p site/city-viewer
+          cp -r city-viewer/dist/. site/city-viewer/
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: city-viewer/dist
+          path: site
 
   deploy:
     needs: build-site
