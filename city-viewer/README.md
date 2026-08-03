@@ -1,50 +1,53 @@
-# Interactive 3D City Building Viewer
+# Pune 3D Building-Typology Explorer
 
-A 3D city you can fly around in the browser, built with [Three.js](https://threejs.org/). No build step, no server-side code — just static files. Two modes:
+A 3D building-typology explorer for Pune, India, built with React, Vite, [MapLibre GL JS](https://maplibre.org/), [deck.gl](https://deck.gl/), and [PMTiles](https://protomaps.com/docs/pmtiles). Every building shown is real — footprints and tags come from [OpenStreetMap](https://www.openstreetmap.org/), classified into 12 typologies by a heuristic tag-based classifier and tiled offline so the browser only ever streams what's in view.
 
-- **Procedural City** — a randomly generated grid city, fully fictional.
-- **Real Pune, India** — a live, tile-streamed explorer of *actual* Pune, built entirely from [OpenStreetMap](https://www.openstreetmap.org/) data. No dummy buildings.
+## How it works
 
-## Features
+- **Data pipeline** (`pipeline/`, runs in CI, not at runtime): fetches Pune's real administrative boundary, extracts it from a Maharashtra OpenStreetMap regional extract, filters to tagged buildings, classifies each one, and tiles the result into a single `.pmtiles` file with [tippecanoe](https://github.com/felt/tippecanoe) + [go-pmtiles](https://github.com/protomaps/go-pmtiles).
+- **Frontend** (`src/`): MapLibre renders the dark CARTO basemap; deck.gl overlays a `TileLayer` that reads vector tiles directly out of the PMTiles file (via HTTP range requests — no server, no tile-serving backend) and extrudes each building to its real height.
+- Nothing is computed over the full dataset at render time — the legend's "in view" counts come from whatever tiles are currently loaded, deduplicated by OSM id.
 
-### Procedural City mode
+## Typology classification
 
-- A grid of buildings split into four districts (Downtown, Residential, Industrial, Business Park), each with its own color palette and height range.
-- Adjustable city size and a Regenerate button for a fresh random layout.
+Each building is classified from its OSM tags (`building`, `amenity`, `shop`, `leisure`, `landuse`, `tourism`, `historic`, `office`, `power`, `man_made`, `railway`, `aeroway`) into one of: Residential, Commercial/Retail, Industrial, Health/Medical, Religious, Educational, Mixed Use, Transport, Recreational/Open Space, Cultural/Heritage, Government/Civic, Utilities/Power. A building with a matching tag is marked `typo_src: osm`; an untagged/generic building defaults to Residential, marked `typo_src: heuristic_default`. Height uses the OSM `height` tag when present, else `building:levels × 3.5m`, else a per-typology default. See `shared/typology.json` for the exact rules and `pipeline/classify-lib.cjs` for the implementation.
 
-### Real Pune, India mode
-
-Everything in this mode comes from live OpenStreetMap data — no random or hardcoded geometry:
-
-- **Tile streaming** — the map is divided into fixed 400m×400m tiles. As you orbit, pan (drag, D-pad, or two-finger drag), or zoom, tiles near the camera load automatically, and tiles that drift far away unload to keep the browser fast. There's no "load area" button to click and no radius cap on how far you can explore — pan continuously across Pune and new real tiles keep streaming in, the same idea Google Maps uses for its own map tiles.
-- **Search any place in Pune** (a neighborhood, road, landmark name) — geocoded live via OpenStreetMap's free Nominatim API, with live autocomplete suggestions as you type — and jump straight there; nearby tiles load automatically on arrival.
-- Each tile brings real: building footprints (with real height/floor-count where tagged, colored by building type), roads and paths (categorized — motorway down to footpath/cycleway/steps, each styled by real width/type), railway lines, bus stops, train stations, and parks/water bodies.
-- Click any building, bus stop, station, park, or water body to see its real OpenStreetMap details in the side panel.
-- **View distance** (adjustable, 250–800m) controls how large a radius around the camera stays loaded at once — bigger means more of the city visible simultaneously, at the cost of more concurrent tile fetches.
-- Only tiles near the camera are ever in memory at once — this is intentional. Pune has hundreds of thousands of real buildings, far more than a browser can render as 3D meshes simultaneously, so this streams what's nearby rather than attempting to hold the whole city in memory at once.
-
-## Running it
-
-Any static file server works, since ES module imports require `http(s)://` (not `file://`):
+## Running it locally
 
 ```bash
-cd city-viewer
-python3 -m http.server 8000
-# then open http://localhost:8000
+npm install
+npm run dev
 ```
 
-## Structure
+The dev server needs a `public/buildings.pmtiles` file to show anything. Generate a small synthetic one for local testing (no network required):
 
-- `index.html` — page shell and UI controls
-- `style.css` — HUD/panel styling
-- `main.js` — scene setup, both modes' rendering, controls, and raycasting for selection
-- `osm-explore.js` — live OpenStreetMap fetching (Overpass API per tile, Nominatim for search), lat/lng-to-scene projection, tile-grid math, and road-style definitions
-- `vendor/three/` — a vendored copy of Three.js (MIT licensed) so the viewer works fully offline (Procedural City mode needs no network at all; Real Pune mode needs it only to fetch map data)
+```bash
+node pipeline/make-sample.cjs /tmp/sample.ndjson
+node pipeline/classify.cjs /tmp/sample.ndjson > /tmp/classified.ndjson
+tippecanoe -o /tmp/buildings.mbtiles --name="Pune Buildings" --layer=buildings \
+  --minimum-zoom=10 --maximum-zoom=16 --force /tmp/classified.ndjson
+go-pmtiles convert /tmp/buildings.mbtiles public/buildings.pmtiles
+```
 
-## About the real-data mode
+(`tippecanoe` and [`go-pmtiles`](https://github.com/protomaps/go-pmtiles) need to be installed — `apt install tippecanoe` and `go install github.com/protomaps/go-pmtiles@latest` on Debian/Ubuntu.)
 
-- **No API key or billing required.** Overpass and Nominatim are free, public OpenStreetMap services.
-- **Scale:** 1 scene unit = 8 real meters, chosen so individual real buildings are large enough to see and click. Position, shape, and height are all real and to that same scale — every tile is projected from one fixed origin (Shaniwar Wada), so tiles line up correctly with each other no matter how far you've panned.
-- **Known gaps:** buildings modeled as OSM multipolygon *relations* (rather than simple ways) aren't rendered yet, and road/rail names aren't shown on click (only buildings, bus stops, stations, parks, and water are clickable). Very sparse or missing data in a given area reflects gaps in OpenStreetMap's coverage there, not a bug in this viewer.
-- **Fair use:** Nominatim and the public Overpass instance are shared community resources. Tile fetches are debounced (only fire ~500ms after you stop moving the camera) and capped at 2 concurrent requests, so normal interactive use — even continuous panning — stays reasonable. Very fast, wide panning across a large view distance can still queue up a number of tile requests in a row; they'll stream in progressively rather than all at once.
-- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [Open Database License](https://opendatacommons.org/licenses/odbl/).
+## Regenerating for a different city
+
+The classifier and tiling pipeline are city-agnostic — `pipeline/fetch-boundary.cjs` takes a place name (`PUNE_BOUNDARY_QUERY` env var), and the rest of the pipeline works from whatever boundary and regional `.osm.pbf` extract you point it at. To retarget:
+
+1. Update `PUNE_BOUNDARY_QUERY` and `MAHARASHTRA_PBF_URL` (the Geofabrik regional extract covering the new city) in `.github/workflows/deploy.yml`.
+2. Update `CITY_CONFIG` in `src/config.js` (name, map center).
+3. Re-run the workflow.
+
+## Deployment
+
+`.github/workflows/deploy.yml` runs the full pipeline against real OpenStreetMap data and deploys to GitHub Pages on every push to `main` (or manually via "Run workflow"). This requires the repository's **Settings → Pages → Build and deployment → Source** to be set to **GitHub Actions** (not "Deploy from a branch").
+
+## Known limitations
+
+- Buildings modeled as OSM multipolygon *relations* (rather than simple ways) aren't included yet — only way-based footprints.
+- Road/rail/transit layers aren't part of this map — it's buildings only.
+- The 12-category color palette can't achieve perfect colorblind-safe separation for every simultaneous pairing at this many categories — text labels are always shown alongside color (legend and click popup) so identity never depends on color alone.
+- Data pipeline fetches happen only in CI (build time), not from the browser — content reflects the OpenStreetMap data as of the last successful workflow run, not live edits.
+
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [Open Database License](https://opendatacommons.org/licenses/odbl/).

@@ -1,0 +1,91 @@
+{
+  "residential": {
+    "label": "Residential",
+    "color": "#3987e5",
+    "defaultHeightM": 9,
+    "buildingTags": ["residential", "house", "detached", "semidetached_house", "terrace", "apartments", "bungalow", "dormitory", "houseboat", "static_caravan", "farm"]
+  },
+  "commercial": {
+    "label": "Commercial / Retail",
+    "color": "#d95926",
+    "defaultHeightM": 12,
+    "buildingTags": ["commercial", "retail", "supermarket", "kiosk", "shop"],
+    "amenityTags": ["marketplace", "fuel", "bank", "restaurant", "cafe", "fast_food", "bar", "pub"],
+    "shopTagPresent": true
+  },
+  "industrial": {
+    "label": "Industrial",
+    "color": "#199e70",
+    "defaultHeightM": 10,
+    "buildingTags": ["industrial", "warehouse", "factory", "manufacture", "hangar"],
+    "landuseTags": ["industrial"]
+  },
+  "health": {
+    "label": "Health / Medical",
+    "color": "#e66767",
+    "defaultHeightM": 12,
+    "buildingTags": ["hospital", "clinic"],
+    "amenityTags": ["hospital", "clinic", "pharmacy", "dentist", "doctors", "veterinary"]
+  },
+  "religious": {
+    "label": "Religious",
+    "color": "#9085e9",
+    "defaultHeightM": 10,
+    "buildingTags": ["church", "mosque", "temple", "synagogue", "cathedral", "chapel", "shrine", "religious"],
+    "amenityTags": ["place_of_worship"]
+  },
+  "educational": {
+    "label": "Educational",
+    "color": "#c98500",
+    "defaultHeightM": 9,
+    "buildingTags": ["school", "university", "college", "kindergarten"],
+    "amenityTags": ["school", "university", "college", "kindergarten", "library"]
+  },
+  "mixed_use": {
+    "label": "Mixed Use",
+    "color": "#d55181",
+    "defaultHeightM": 15,
+    "buildingTags": ["mixed_use", "commercial;residential", "residential;commercial"]
+  },
+  "transport": {
+    "label": "Transport",
+    "color": "#008300",
+    "defaultHeightM": 8,
+    "buildingTags": ["train_station", "transportation", "parking", "garage", "garages"],
+    "amenityTags": ["bus_station", "parking", "ferry_terminal"],
+    "railwayTags": ["station", "halt"],
+    "aerowayTags": ["terminal", "hangar"]
+  },
+  "recreational": {
+    "label": "Recreational / Open Space",
+    "color": "#7c9a2e",
+    "defaultHeightM": 6,
+    "buildingTags": ["sports_hall", "stadium", "grandstand", "pavilion"],
+    "leisureTags": ["sports_centre", "stadium", "park", "pitch", "fitness_centre", "swimming_pool"]
+  },
+  "cultural": {
+    "label": "Cultural / Heritage",
+    "color": "#b45309",
+    "defaultHeightM": 10,
+    "buildingTags": ["museum", "castle", "monument", "heritage"],
+    "amenityTags": ["theatre", "arts_centre", "cinema"],
+    "tourismTags": ["museum", "attraction", "gallery"],
+    "historicTagPresent": true
+  },
+  "government": {
+    "label": "Government / Civic",
+    "color": "#1f8fb5",
+    "defaultHeightM": 12,
+    "buildingTags": ["government", "civic", "courthouse"],
+    "amenityTags": ["townhall", "courthouse", "police", "fire_station", "post_office", "embassy"],
+    "officeTags": ["government"]
+  },
+  "utilities": {
+    "label": "Utilities / Power",
+    "color": "#8a4a75",
+    "defaultHeightM": 8,
+    "buildingTags": ["service", "transformer_tower", "water_tower", "reservoir_covered"],
+    "powerTags": ["substation", "plant", "generator"],
+    "manMadeTags": ["water_tower", "water_works", "wastewater_plant", "storage_tank"]
+  }
+}

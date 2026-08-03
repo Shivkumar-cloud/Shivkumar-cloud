@@ -1,92 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Interactive 3D City Building Viewer</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <div id="app">
-    <canvas id="scene"></canvas>
-
-    <header id="hud">
-      <h1>3D City Viewer</h1>
-      <p class="subtitle">Drag to orbit &middot; right-drag (or two-finger drag) to pan &middot; scroll to zoom &middot; click to inspect</p>
-    </header>
-
-    <section id="panel">
-      <div class="panel-group mode-group">
-        <button id="mode-procedural" class="active">🏙️ Procedural City</button>
-        <button id="mode-pune">🕌 Real Pune, India</button>
-      </div>
-
-      <div class="panel-group" id="commonControls">
-        <button id="regenerate">🔁 Regenerate</button>
-        <button id="toggle-day">🌗 Day / Night</button>
-        <button id="toggle-wireframe">🔲 Wireframe</button>
-        <button id="reset-camera">🎯 Reset Camera</button>
-      </div>
-
-      <div class="panel-group slider-group" id="citySizeGroup">
-        <label for="citySize">City size: <span id="citySizeValue">12</span></label>
-        <input type="range" id="citySize" min="4" max="24" step="1" value="12" />
-      </div>
-
-      <div class="panel-group slider-group hidden" id="exploreGroup">
-        <label for="placeSearch">Search a place in Pune</label>
-        <div class="search-row">
-          <input type="text" id="placeSearch" placeholder="e.g. Kothrud, Hinjewadi, MG Road" autocomplete="off" />
-          <button id="search-go">Go</button>
-          <div id="searchSuggestions" class="suggestions hidden"></div>
-        </div>
-
-        <label for="exploreRadius">View distance: <span id="exploreRadiusValue">400</span> m</label>
-        <input type="range" id="exploreRadius" min="250" max="800" step="50" value="400" />
-        <p class="hint-text">Tiles stream in automatically as you pan, orbit, or zoom — like Google Maps, but real OpenStreetMap data. No manual loading needed.</p>
-
-        <button id="load-area">🔄 Refresh Nearby Tiles</button>
-        <p id="explore-status" class="status-text"></p>
-        <p class="attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</p>
-      </div>
-    </section>
-
-    <aside id="info" class="hidden">
-      <button id="info-close" aria-label="Close">&times;</button>
-      <h2 id="info-title">Building</h2>
-      <dl id="info-stats">
-        <dt>Height</dt><dd id="info-height">-</dd>
-        <dt>Floors</dt><dd id="info-floors">-</dd>
-        <dt>Footprint</dt><dd id="info-footprint">-</dd>
-        <dt>Type</dt><dd id="info-district">-</dd>
-      </dl>
-      <p id="info-description" class="hidden"></p>
-    </aside>
-
-    <div id="loading">Loading city…</div>
-
-    <div id="navControls" aria-label="Navigation controls">
-      <div class="dpad">
-        <span></span><button id="nav-up" aria-label="Pan up">▲</button><span></span>
-        <button id="nav-left" aria-label="Pan left">◀</button>
-        <button id="nav-down" aria-label="Pan down">▼</button>
-        <button id="nav-right" aria-label="Pan right">▶</button>
-      </div>
-      <div class="zoom-controls">
-        <button id="nav-zoom-in" aria-label="Zoom in">＋</button>
-        <button id="nav-zoom-out" aria-label="Zoom out">－</button>
-      </div>
-    </div>
-  </div>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "./vendor/three/three.module.js",
-        "three/addons/": "./vendor/three/examples/jsm/"
-      }
-    }
-  </script>
-  <script type="module" src="main.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pune 3D Building Typology Explorer</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
 </html>
