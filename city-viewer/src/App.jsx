@@ -85,7 +85,7 @@ export default function App() {
         styledata: {debugInfo.styledata ? "y" : "n"} · render: {debugInfo.render ? "y" : "n"} · idle:{" "}
         {debugInfo.idle ? "y" : "n"}
         <br />
-        tiles: {debugInfo.tiles ?? "?"}
+        tiles: {debugInfo.tiles ?? "?"} {debugInfo.basemapFallback && "· FALLBACK BASEMAP ACTIVE"}
         <br />
         carto net: {debugInfo.net ?? "?"}
         {debugInfo.netError && (

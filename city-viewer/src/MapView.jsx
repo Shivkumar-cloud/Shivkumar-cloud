@@ -157,6 +157,21 @@ export default function MapView({
       });
     }, 1000);
 
+    // Self-heal: if barely any basemap tiles have actually painted after a
+    // few seconds despite plenty being requested, the primary provider is
+    // effectively stuck for this client (seen in practice: CARTO's style
+    // JSON loads fine but almost no vector tiles ever complete). Switch the
+    // whole style to a different CDN rather than leaving the map blank.
+    // Buildings are unaffected — they're a deck.gl overlay, not part of the
+    // MapLibre style, so they survive a setStyle() call.
+    const fallbackTimeout = setTimeout(() => {
+      if (tileCounts.content <= 1 && tileCounts.loading > 5) {
+        console.warn("Basemap tiles appear stuck; switching to fallback basemap.");
+        onDebug?.({ basemapFallback: true });
+        map.setStyle(CITY_CONFIG.fallbackBasemapStyle);
+      }
+    }, 8000);
+
     // MapLibre swallows style/tile network failures into a console error by
     // default, which leaves the map looking like a plain black screen with
     // no way for a user (or us, remotely) to tell what went wrong. Surface it.
@@ -204,6 +219,7 @@ export default function MapView({
 
     return () => {
       clearTimeout(loadTimeout);
+      clearTimeout(fallbackTimeout);
       clearInterval(netInterval);
       clearInterval(tileInterval);
       map.remove();
