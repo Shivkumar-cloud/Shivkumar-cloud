@@ -193,8 +193,14 @@ export default function MapView({
       rebuildLayer();
       onMapReady?.();
     };
-    if (map.loaded()) start();
-    else map.once("load", start);
+    // Deliberately use 'style.load' (style/sources parsed) rather than
+    // 'load' (which additionally waits for the first fully-painted basemap
+    // frame). 'load' ties our own same-origin building layer's visibility to
+    // the third-party basemap's tile-loading speed for no reason — if the
+    // basemap is slow or stuck, 'load' never fires and buildings never show
+    // either, even though they have nothing to do with each other.
+    if (map.isStyleLoaded()) start();
+    else map.once("style.load", start);
 
     return () => {
       clearTimeout(loadTimeout);
