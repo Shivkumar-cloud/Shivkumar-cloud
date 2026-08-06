@@ -15,6 +15,7 @@
     "deck.gl": "^9.3.7",
     "maplibre-gl": "^6.1.0",
     "pmtiles": "^4.4.1",
+    "protomaps-themes-base": "^4.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

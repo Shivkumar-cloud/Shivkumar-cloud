@@ -1,16 +1,32 @@
 import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+// MapLibre derives its worker URL at runtime (`new URL('./maplibre-gl-worker.mjs', …)`),
+// which bundlers can't statically detect — so Vite never emits the file and the
+// worker 404s. That went unnoticed while the basemap was raster (images decode on
+// the main thread) and the buildings are parsed by deck.gl, but a *vector* basemap
+// parses its tiles in that worker, so it has to actually load. `?url` makes Vite
+// emit the file and hand back its hashed path.
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { TileLayer } from "@deck.gl/geo-layers";
 import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { DataFilterExtension } from "@deck.gl/extensions";
-import { PMTiles } from "pmtiles";
+import { PMTiles, Protocol } from "pmtiles";
 import { load } from "@loaders.gl/core";
 import { MVTLoader } from "@loaders.gl/mvt";
 import { CITY_CONFIG } from "./config";
 import { colorForFeature } from "./colors";
 import { poiColor } from "./poiColors";
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
+
+// Teach MapLibre to read pmtiles:// URLs so the self-hosted basemap archive
+// can be served straight out of a single file via HTTP range requests, the
+// same way the building/POI layers already are. Registered at module scope so
+// it happens once, before any Map is constructed.
+const pmtilesProtocol = new Protocol();
+maplibregl.addProtocol("pmtiles", pmtilesProtocol.tile);
 
 // One shared PMTiles reader for the file's lifetime — it manages its own
 // directory/header caching internally, so a single instance should serve

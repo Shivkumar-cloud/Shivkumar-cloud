@@ -5,7 +5,8 @@ A 3D building-typology explorer for Pune, India, built with React, Vite, [MapLib
 ## How it works
 
 - **Data pipeline** (`pipeline/`, runs in CI, not at runtime): fetches Pune's real administrative boundary, extracts it from a Maharashtra OpenStreetMap regional extract, filters to tagged buildings, classifies each one, and tiles the result into a `buildings.pmtiles` file with [tippecanoe](https://github.com/felt/tippecanoe) + [go-pmtiles](https://github.com/protomaps/go-pmtiles). A second, separate extraction does the same for point POIs (traffic signals, pedestrian crossings, bus stops), producing `pois.pmtiles`.
-- **Frontend** (`src/`): MapLibre renders the [OpenFreeMap](https://openfreemap.org/) basemap; deck.gl overlays a `TileLayer` (buildings, extruded to real height) and, when the "Show traffic/POIs" toggle is on, a second `TileLayer` of point markers, both reading vector tiles directly out of their PMTiles files via HTTP range requests — no server, no tile-serving backend.
+- **Basemap** (`basemap.pmtiles`, also built in CI): a [Protomaps](https://protomaps.com/) planet extract clipped to Pune, self-hosted alongside the other tiles. Three third-party tile CDNs were tried first and each failed to deliver tiles on some networks, so the basemap now uses the same same-origin delivery path as everything else — which also keeps us off OSM's tile servers, per their [usage policy](https://operations.osmfoundation.org/policies/tiles/), with no API key or quota.
+- **Frontend** (`src/`): MapLibre renders that basemap via the `pmtiles://` protocol; deck.gl overlays a `TileLayer` (buildings, extruded to real height) and, when the "Show traffic/POIs" toggle is on, a second `TileLayer` of point markers, both reading vector tiles directly out of their PMTiles files via HTTP range requests — no server, no tile-serving backend.
 - Nothing is computed over the full dataset at render time — the legend's "in view" counts come from whatever tiles are currently loaded, deduplicated by OSM id.
 
 ## Typology classification
@@ -36,6 +37,24 @@ go-pmtiles convert /tmp/buildings.mbtiles public/buildings.pmtiles
 (`tippecanoe` and [`go-pmtiles`](https://github.com/protomaps/go-pmtiles) need to be installed — `apt install tippecanoe` and `go install github.com/protomaps/go-pmtiles@latest` on Debian/Ubuntu.)
 
 The "Show traffic/POIs" toggle needs a `public/pois.pmtiles` the same way — without it the toggle just shows an empty point layer (each tile 404s, no crash). To generate a synthetic one, run the same three commands against `classify-poi.cjs` and a geojsonseq of point features instead.
+
+The basemap needs `public/basemap.pmtiles`. Grab the same Pune extract CI builds (needs network):
+
+```bash
+go-pmtiles extract https://build.protomaps.com/<YYYYMMDD>.pmtiles public/basemap.pmtiles \
+  --bbox=73.65,18.42,74.05,18.75 --maxzoom=15
+```
+
+### Serving a production build locally
+
+**PMTiles is read with HTTP range requests, and Python's `http.server` doesn't implement them** — serving `dist/` with it makes every tile fail with a content-length error. Use the bundled range-capable server instead:
+
+```bash
+npm run build
+node range-server.mjs dist 8931
+```
+
+`npm run dev` is fine as-is; Vite's dev server handles ranges.
 
 ## Regenerating for a different city
 

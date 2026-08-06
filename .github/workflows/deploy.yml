@@ -147,6 +147,64 @@ jobs:
           path: city-viewer/pipeline/pois.pmtiles
           retention-days: 7
 
+      # Self-hosted basemap (roads, water, labels), extracted from the
+      # Protomaps daily planet build down to just the Pune area. Serving this
+      # from our own origin alongside buildings.pmtiles avoids depending on a
+      # third-party tile CDN, and avoids hotlinking OSM's tile servers, which
+      # their usage policy asks deployments not to do.
+      - name: Extract Pune basemap from the Protomaps daily build
+        working-directory: city-viewer/pipeline
+        run: |
+          set -e
+          # Protomaps publishes a daily planet build as build.protomaps.com/YYYYMMDD.pmtiles.
+          # There is no stable "latest" alias, and today's build may not be
+          # published yet, so walk backwards until one resolves.
+          BUILD_URL=""
+          for i in $(seq 0 9); do
+            d=$(date -u -d "-$i day" +%Y%m%d)
+            candidate="https://build.protomaps.com/${d}.pmtiles"
+            if curl -fsI --max-time 30 "$candidate" > /dev/null 2>&1; then
+              BUILD_URL="$candidate"
+              echo "Using Protomaps daily build: $d"
+              break
+            fi
+          done
+          if [ -z "$BUILD_URL" ]; then
+            echo "::error::No Protomaps daily build found in the last 10 days"
+            exit 1
+          fi
+
+          # Reuse the same boundary the building extract used, reduced to its
+          # bounding box (go-pmtiles --bbox is the most predictable input, and
+          # a rectangle is fine for a basemap backdrop).
+          BBOX=$(node -e "
+            const fs = require('fs');
+            const f = JSON.parse(fs.readFileSync('pune-boundary.geojson', 'utf8'));
+            const g = f.geometry || f;
+            const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const poly of polys) for (const ring of poly) for (const [x, y] of ring) {
+              if (x < minX) minX = x;
+              if (y < minY) minY = y;
+              if (x > maxX) maxX = x;
+              if (y > maxY) maxY = y;
+            }
+            console.log([minX, minY, maxX, maxY].join(','));
+          ")
+          echo "Extracting bbox: $BBOX"
+
+          # z15 is the Protomaps planet's max zoom; MapLibre overzooms past it
+          # for closer views, and our own building tiles carry the detail there.
+          go-pmtiles extract "$BUILD_URL" basemap.pmtiles --bbox="$BBOX" --maxzoom=15
+          ls -la basemap.pmtiles
+
+      - name: Upload basemap PMTiles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: basemap-pmtiles
+          path: city-viewer/pipeline/basemap.pmtiles
+          retention-days: 7
+
   build-site:
     needs: build-data
     runs-on: ubuntu-latest
@@ -169,6 +227,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: pois-pmtiles
+          path: city-viewer/public
+
+      - name: Download basemap PMTiles artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: basemap-pmtiles
           path: city-viewer/public
 
       - working-directory: city-viewer

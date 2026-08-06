@@ -5,4 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   base: '/Shivkumar-cloud/city-viewer/',
   plugins: [react()],
+  // MapLibre loads its worker as an ES module; Vite defaults worker builds to
+  // IIFE, which that path can't consume.
+  worker: { format: 'es' },
 })
