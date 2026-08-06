@@ -24,7 +24,6 @@ export default function App() {
   const [selectedBuilding, setSelectedBuilding] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [mapError, setMapError] = useState(null);
-  const [debugInfo, setDebugInfo] = useState({});
 
   useEffect(() => {
     const p = new PMTiles(CITY_CONFIG.pmtilesUrl);
@@ -69,7 +68,6 @@ export default function App() {
         onViewCounts={setViewCounts}
         onSelectBuilding={setSelectedBuilding}
         onError={setMapError}
-        onDebug={(patch) => setDebugInfo((d) => ({ ...d, ...patch }))}
       />
 
       {mapError && (
@@ -77,32 +75,6 @@ export default function App() {
           {mapError}
         </div>
       )}
-
-      {/* Temporary diagnostic HUD while tracking down a black-map report — remove once resolved. */}
-      <div className="debug-hud">
-        gl: {debugInfo.glType ?? "?"} · canvas: {debugInfo.canvasSize ?? "?"} · container: {debugInfo.containerSize ?? "?"}
-        <br />
-        styledata: {debugInfo.styledata ? "y" : "n"} · render: {debugInfo.render ? "y" : "n"} · idle:{" "}
-        {debugInfo.idle ? "y" : "n"}
-        <br />
-        tiles: {debugInfo.tiles ?? "?"} {debugInfo.basemapFallback && "· FALLBACK BASEMAP ACTIVE"}
-        <br />
-        carto net: {debugInfo.net ?? "?"}
-        {debugInfo.netError && (
-          <>
-            <br />
-            last carto error: {debugInfo.netError}
-          </>
-        )}
-        <br />
-        building tiles: {debugInfo.buildingTiles ?? "?"}
-        {debugInfo.buildingTilesError && (
-          <>
-            <br />
-            last building tile error: {debugInfo.buildingTilesError}
-          </>
-        )}
-      </div>
 
       <header className="title-panel">
         <h1>{CITY_CONFIG.name}</h1>

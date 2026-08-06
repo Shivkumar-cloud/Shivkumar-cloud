@@ -16,43 +16,6 @@ import { colorForFeature } from "./colors";
 // every tile request rather than re-opening the archive per tile.
 const pmtilesInstance = new PMTiles(CITY_CONFIG.pmtilesUrl);
 
-// Temporary diagnostic: MapLibre's own lifecycle events ('sourcedata',
-// 'render') fire even for empty/metadata-only frames, so they can't tell us
-// whether the basemap's actual tile requests are succeeding, failing, or
-// hanging. Patch fetch directly to count real network outcomes instead.
-export const netStats = { started: 0, ok: 0, failed: 0, pending: new Set(), lastError: null };
-if (!window.__cartoFetchPatched) {
-  window.__cartoFetchPatched = true;
-  const origFetch = window.fetch.bind(window);
-  window.fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : input?.url || "";
-    const isCarto = url.includes("cartocdn");
-    if (isCarto) {
-      netStats.started++;
-      netStats.pending.add(url);
-    }
-    try {
-      const res = await origFetch(input, init);
-      if (isCarto) {
-        netStats.pending.delete(url);
-        if (res.ok) netStats.ok++;
-        else {
-          netStats.failed++;
-          netStats.lastError = `HTTP ${res.status} ${url.slice(-40)}`;
-        }
-      }
-      return res;
-    } catch (err) {
-      if (isCarto) {
-        netStats.pending.delete(url);
-        netStats.failed++;
-        netStats.lastError = `${err.message} ${url.slice(-40)}`;
-      }
-      throw err;
-    }
-  };
-}
-
 export default function MapView({
   colorMode,
   ranges,
@@ -64,7 +27,6 @@ export default function MapView({
   onSelectBuilding,
   onMapReady,
   onError,
-  onDebug,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -75,10 +37,6 @@ export default function MapView({
   // to rebuild the TileLayer (and its tile cache) on every filter tweak.
   const propsRef = useRef({});
   propsRef.current = { colorMode, ranges, heightFilter, scale, is3D, onSelectBuilding, onViewCounts };
-  // Temporary diagnostic: is our own same-origin PMTiles building layer
-  // loading tiles at all, independent of whatever the third-party basemap
-  // is doing? If this is also stuck, the problem isn't CARTO-specific.
-  const buildingStatsRef = useRef({ attempted: 0, ok: 0, failed: 0, empty: 0, lastError: null });
 
   useEffect(() => {
     // MapLibre needs WebGL; on devices/browsers without it the constructor
@@ -102,75 +60,6 @@ export default function MapView({
     }
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 140, unit: "metric" }), "bottom-left");
-
-    // Temporary diagnostic HUD: the map can reach 'load' successfully (no
-    // error, no timeout) yet still paint nothing visible on some devices, so
-    // surface exactly how far rendering actually got instead of guessing.
-    const canvas = map.getCanvas();
-    const glType = canvas.getContext("webgl2") ? "webgl2" : canvas.getContext("webgl") ? "webgl" : "none";
-    const rect = containerRef.current.getBoundingClientRect();
-    onDebug?.({
-      glType,
-      canvasSize: `${canvas.width}x${canvas.height}`,
-      containerSize: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
-    });
-    const seenEvents = new Set();
-    const markOnce = (name) => {
-      if (seenEvents.has(name)) return;
-      seenEvents.add(name);
-      onDebug?.({ [name]: true });
-    };
-    const netInterval = setInterval(() => {
-      onDebug?.({
-        net: `started:${netStats.started} ok:${netStats.ok} failed:${netStats.failed} pending:${netStats.pending.size}`,
-        netError: netStats.lastError,
-      });
-      const b = buildingStatsRef.current;
-      onDebug?.({
-        buildingTiles: `attempted:${b.attempted} ok:${b.ok} failed:${b.failed} empty:${b.empty}`,
-        buildingTilesError: b.lastError,
-      });
-    }, 1000);
-
-    map.on("styledata", () => markOnce("styledata"));
-    map.on("render", () => markOnce("render"));
-    map.on("idle", () => markOnce("idle"));
-
-    // sourcedata/dataloading fire for style metadata too, which made the
-    // earlier 'y' reading meaningless — sourceDataType distinguishes an
-    // actual tile arriving ('content') from just the source's metadata.
-    // Real tile fetches happen inside a worker thread, so this (rather than
-    // patching fetch) is the only way to see them from the main thread.
-    const tileCounts = { loading: 0, content: 0, metadata: 0, other: 0 };
-    map.on("dataloading", (e) => {
-      if (e.dataType === "source") tileCounts.loading++;
-    });
-    map.on("sourcedata", (e) => {
-      if (e.dataType !== "source") return;
-      if (e.sourceDataType === "content") tileCounts.content++;
-      else if (e.sourceDataType === "metadata") tileCounts.metadata++;
-      else tileCounts.other++;
-    });
-    const tileInterval = setInterval(() => {
-      onDebug?.({
-        tiles: `loading:${tileCounts.loading} content:${tileCounts.content} metadata:${tileCounts.metadata} other:${tileCounts.other}`,
-      });
-    }, 1000);
-
-    // Self-heal: if barely any basemap tiles have actually painted after a
-    // few seconds despite plenty being requested, the primary provider is
-    // effectively stuck for this client (seen in practice: CARTO's style
-    // JSON loads fine but almost no vector tiles ever complete). Switch the
-    // whole style to a different CDN rather than leaving the map blank.
-    // Buildings are unaffected — they're a deck.gl overlay, not part of the
-    // MapLibre style, so they survive a setStyle() call.
-    const fallbackTimeout = setTimeout(() => {
-      if (tileCounts.content <= 1 && tileCounts.loading > 5) {
-        console.warn("Basemap tiles appear stuck; switching to fallback basemap.");
-        onDebug?.({ basemapFallback: true });
-        map.setStyle(CITY_CONFIG.fallbackBasemapStyle);
-      }
-    }, 8000);
 
     // MapLibre swallows style/tile network failures into a console error by
     // default, which leaves the map looking like a plain black screen with
@@ -219,9 +108,6 @@ export default function MapView({
 
     return () => {
       clearTimeout(loadTimeout);
-      clearTimeout(fallbackTimeout);
-      clearInterval(netInterval);
-      clearInterval(tileInterval);
       map.remove();
       mapRef.current = null;
       overlayRef.current = null;
@@ -248,25 +134,13 @@ export default function MapView({
       },
       getTileData: async ({ index, signal }) => {
         const { z, x, y } = index;
-        const stats = buildingStatsRef.current;
-        stats.attempted++;
-        try {
-          const result = await pmtilesInstance.getZxy(z, x, y, signal);
-          if (!result?.data) {
-            stats.empty++;
-            return [];
-          }
-          const features = await load(result.data, MVTLoader, {
-            mvt: { coordinates: "wgs84", tileIndex: { x, y, z } },
-            worker: false, // avoid depending on an external CDN for the parser worker at runtime
-          });
-          stats.ok++;
-          return features.filter((f) => f && f.properties);
-        } catch (err) {
-          stats.failed++;
-          stats.lastError = err?.message || String(err);
-          throw err;
-        }
+        const result = await pmtilesInstance.getZxy(z, x, y, signal);
+        if (!result?.data) return [];
+        const features = await load(result.data, MVTLoader, {
+          mvt: { coordinates: "wgs84", tileIndex: { x, y, z } },
+          worker: false, // avoid depending on an external CDN for the parser worker at runtime
+        });
+        return features.filter((f) => f && f.properties);
       },
       renderSubLayers: (subProps) => {
         return new GeoJsonLayer({
