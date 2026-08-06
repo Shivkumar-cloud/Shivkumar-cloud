@@ -3,18 +3,20 @@ import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { TileLayer } from "@deck.gl/geo-layers";
-import { GeoJsonLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import { PMTiles } from "pmtiles";
 import { load } from "@loaders.gl/core";
 import { MVTLoader } from "@loaders.gl/mvt";
 import { CITY_CONFIG } from "./config";
 import { colorForFeature } from "./colors";
+import { poiColor } from "./poiColors";
 
 // One shared PMTiles reader for the file's lifetime — it manages its own
 // directory/header caching internally, so a single instance should serve
 // every tile request rather than re-opening the archive per tile.
 const pmtilesInstance = new PMTiles(CITY_CONFIG.pmtilesUrl);
+const poiPmtilesInstance = new PMTiles(CITY_CONFIG.poiPmtilesUrl);
 
 export default function MapView({
   colorMode,
@@ -23,7 +25,9 @@ export default function MapView({
   scale,
   is3D,
   resetToken,
+  showPois,
   onViewCounts,
+  onPoiViewCounts,
   onSelectBuilding,
   onMapReady,
   onError,
@@ -33,10 +37,21 @@ export default function MapView({
   const overlayRef = useRef(null);
   const mapLoadedRef = useRef(false);
   const seenIdsRef = useRef(new Set());
+  const seenPoiIdsRef = useRef(new Set());
   // Latest prop values, read inside stable deck.gl callbacks so we don't need
   // to rebuild the TileLayer (and its tile cache) on every filter tweak.
   const propsRef = useRef({});
-  propsRef.current = { colorMode, ranges, heightFilter, scale, is3D, onSelectBuilding, onViewCounts };
+  propsRef.current = {
+    colorMode,
+    ranges,
+    heightFilter,
+    scale,
+    is3D,
+    showPois,
+    onSelectBuilding,
+    onViewCounts,
+    onPoiViewCounts,
+  };
 
   useEffect(() => {
     // MapLibre needs WebGL; on devices/browsers without it the constructor
@@ -118,9 +133,9 @@ export default function MapView({
 
   function rebuildLayer() {
     if (!overlayRef.current || !mapLoadedRef.current) return;
-    const { colorMode: cm, ranges: rg, heightFilter: hf, scale: sc, is3D: d3 } = propsRef.current;
+    const { colorMode: cm, ranges: rg, heightFilter: hf, scale: sc, is3D: d3, showPois: sp } = propsRef.current;
 
-    const layer = new TileLayer({
+    const buildingsLayer = new TileLayer({
       id: "buildings",
       minZoom: 10,
       maxZoom: 16,
@@ -187,14 +202,76 @@ export default function MapView({
       },
     });
 
-    overlayRef.current.setProps({ layers: [layer] });
+    const layers = [buildingsLayer];
+
+    if (sp) {
+      layers.push(
+        new TileLayer({
+          id: "pois",
+          minZoom: 12,
+          maxZoom: 16,
+          tileSize: 512,
+          getTileData: async ({ index, signal }) => {
+            const { z, x, y } = index;
+            const result = await poiPmtilesInstance.getZxy(z, x, y, signal);
+            if (!result?.data) return [];
+            const features = await load(result.data, MVTLoader, {
+              mvt: { coordinates: "wgs84", tileIndex: { x, y, z } },
+              worker: false,
+            });
+            return features.filter((f) => f && f.properties);
+          },
+          renderSubLayers: (subProps) => {
+            return new ScatterplotLayer({
+              id: `${subProps.id}-scatter`,
+              data: subProps.data,
+              pickable: true,
+              radiusUnits: "pixels",
+              getPosition: (f) => f.geometry.coordinates,
+              getRadius: 5,
+              getFillColor: (f) => poiColor(f.properties?.poi_type),
+              getLineColor: [20, 20, 20],
+              lineWidthUnits: "pixels",
+              getLineWidth: 1,
+              stroked: true,
+              onClick: (info) => {
+                if (info.object) propsRef.current.onSelectBuilding(info.object.properties);
+              },
+            });
+          },
+          onViewportLoad: (tiles) => {
+            const counts = {};
+            const seen = seenPoiIdsRef.current;
+            seen.clear();
+            for (const tile of tiles || []) {
+              const features = tile?.content;
+              if (!Array.isArray(features)) continue;
+              for (const f of features) {
+                const p = f.properties || {};
+                const key = p.id ?? `${p.name || ""}:${f.geometry?.coordinates?.join(",")}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const t = p.poi_type;
+                if (!t) continue;
+                counts[t] = (counts[t] || 0) + 1;
+              }
+            }
+            propsRef.current.onPoiViewCounts?.(counts);
+          },
+        })
+      );
+    } else {
+      propsRef.current.onPoiViewCounts?.({});
+    }
+
+    overlayRef.current.setProps({ layers });
   }
 
   // Rebuild whenever a rendering-affecting prop changes (after the map exists).
   useEffect(() => {
     rebuildLayer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [colorMode, ranges, heightFilter, scale, is3D]);
+  }, [colorMode, ranges, heightFilter, scale, is3D, showPois]);
 
   // Reset camera
   useEffect(() => {

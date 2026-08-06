@@ -8,6 +8,8 @@ export default function ControlsPanel({
   onScale,
   is3D,
   onToggle3D,
+  showPois,
+  onTogglePois,
   onReset,
   onAbout,
 }) {
@@ -58,6 +60,12 @@ export default function ControlsPanel({
         </button>
         <button onClick={onReset}>Reset</button>
         <button onClick={onAbout}>About</button>
+      </div>
+
+      <div className="control-row">
+        <button className={showPois ? "active" : ""} onClick={onTogglePois}>
+          {showPois ? "Hide traffic/POIs" : "Show traffic/POIs"}
+        </button>
       </div>
     </div>
   );

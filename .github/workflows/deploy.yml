@@ -104,6 +104,49 @@ jobs:
           path: city-viewer/pipeline/buildings.pmtiles
           retention-days: 7
 
+      # POIs (traffic signals, pedestrian crossings, bus stops) are point
+      # nodes, a completely separate extraction from the building polygons
+      # above, so they're filtered from the same region-wide pune.osm.pbf
+      # rather than the buildings-only subset.
+      - name: Filter to traffic/POI nodes
+        working-directory: city-viewer/pipeline
+        run: |
+          osmium tags-filter -o pune-pois.osm.pbf --overwrite pune.osm.pbf \
+            n/highway=traffic_signals,crossing,bus_stop n/public_transport=platform
+
+      - name: Export POI points to GeoJSONSeq
+        working-directory: city-viewer/pipeline
+        run: |
+          osmium export pune-pois.osm.pbf \
+            -f geojsonseq -o pune-pois.geojsonseq --overwrite \
+            -a type,id --geometry-types=point
+
+      - name: Classify POIs
+        working-directory: city-viewer/pipeline
+        run: node classify-poi.cjs pune-pois.geojsonseq > classified-pois.ndjson
+
+      - name: Build POI vector tiles (tippecanoe)
+        working-directory: city-viewer/pipeline
+        run: |
+          tippecanoe -o pois.mbtiles \
+            --name="Pune Traffic/POIs" \
+            --attribution="© OpenStreetMap contributors" \
+            --layer=pois \
+            --minimum-zoom=12 --maximum-zoom=16 \
+            --force \
+            classified-pois.ndjson
+
+      - name: Convert POIs to PMTiles
+        working-directory: city-viewer/pipeline
+        run: go-pmtiles convert pois.mbtiles pois.pmtiles
+
+      - name: Upload POI PMTiles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pois-pmtiles
+          path: city-viewer/pipeline/pois.pmtiles
+          retention-days: 7
+
   build-site:
     needs: build-data
     runs-on: ubuntu-latest
@@ -120,6 +163,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: buildings-pmtiles
+          path: city-viewer/public
+
+      - name: Download POI PMTiles artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pois-pmtiles
           path: city-viewer/public
 
       - working-directory: city-viewer

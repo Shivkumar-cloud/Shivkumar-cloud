@@ -1,0 +1,18 @@
+{
+  "traffic_signal": {
+    "label": "Traffic Signal",
+    "color": "#e63946",
+    "highwayTags": ["traffic_signals"]
+  },
+  "crossing": {
+    "label": "Pedestrian Crossing",
+    "color": "#f2b705",
+    "highwayTags": ["crossing"]
+  },
+  "bus_stop": {
+    "label": "Bus Stop",
+    "color": "#2a9d8f",
+    "highwayTags": ["bus_stop"],
+    "publicTransportTags": ["platform"]
+  }
+}

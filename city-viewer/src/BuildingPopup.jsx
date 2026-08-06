@@ -1,5 +1,23 @@
 export default function BuildingPopup({ building, onClose }) {
   if (!building) return null;
+
+  if (building.poi_type) {
+    return (
+      <aside className="popup">
+        <button className="popup-close" onClick={onClose} aria-label="Close">
+          &times;
+        </button>
+        <h2>{building.name || building.poi_type_label}</h2>
+        <dl>
+          <dt>Type</dt>
+          <dd>{building.poi_type_label}</dd>
+          <dt>Source</dt>
+          <dd>{building.source}</dd>
+        </dl>
+      </aside>
+    );
+  }
+
   return (
     <aside className="popup">
       <button className="popup-close" onClick={onClose} aria-label="Close">

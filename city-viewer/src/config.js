@@ -5,5 +5,10 @@ export const CITY_CONFIG = {
   pitch: 45,
   bearing: 0,
   pmtilesUrl: `${import.meta.env.BASE_URL}buildings.pmtiles`,
-  basemapStyle: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+  poiPmtilesUrl: `${import.meta.env.BASE_URL}pois.pmtiles`,
+  // CARTO's Dark Matter style JSON loads fine but its tiles proved
+  // unreliable in practice (most never completed loading for some
+  // users/networks). OpenFreeMap is a different CDN with no API key
+  // required and has been reliable where CARTO wasn't.
+  basemapStyle: "https://tiles.openfreemap.org/styles/liberty",
 };

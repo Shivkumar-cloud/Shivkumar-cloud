@@ -21,6 +21,8 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
 
   const [viewCounts, setViewCounts] = useState({});
+  const [showPois, setShowPois] = useState(false);
+  const [poiViewCounts, setPoiViewCounts] = useState({});
   const [selectedBuilding, setSelectedBuilding] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [mapError, setMapError] = useState(null);
@@ -65,7 +67,9 @@ export default function App() {
         scale={scale}
         is3D={is3D}
         resetToken={resetToken}
+        showPois={showPois}
         onViewCounts={setViewCounts}
+        onPoiViewCounts={setPoiViewCounts}
         onSelectBuilding={setSelectedBuilding}
         onError={setMapError}
       />
@@ -96,6 +100,8 @@ export default function App() {
           onScale={setScale}
           is3D={is3D}
           onToggle3D={() => setIs3D((v) => !v)}
+          showPois={showPois}
+          onTogglePois={() => setShowPois((v) => !v)}
           onReset={() => {
             setResetToken((t) => t + 1);
             setHeightFilter(heightBounds);
@@ -106,6 +112,7 @@ export default function App() {
           onAbout={() => setAboutOpen(true)}
         />
         <Legend viewCounts={viewCounts} zoomedIn={Object.keys(viewCounts).length > 0} />
+        {showPois && <Legend poi viewCounts={poiViewCounts} zoomedIn={Object.keys(poiViewCounts).length > 0} />}
       </div>
 
       <BuildingPopup building={selectedBuilding} onClose={() => setSelectedBuilding(null)} />
